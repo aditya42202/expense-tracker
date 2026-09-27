@@ -1,0 +1,9 @@
+{
+  "python.defaultInterpreterPath": "C:/Users/Aditya Pandey/OneDrive/Desktop/Real Time Accessible Projects/expense/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/backend",
+    "${workspaceFolder}"
+  ],
+  "python.analysis.autoSearchPaths": true,
+  "python.analysis.diagnosticMode": "workspace"
+}
