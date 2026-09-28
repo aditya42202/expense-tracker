@@ -8,12 +8,27 @@ from .models import Category
 DEFAULT_CATEGORIES = [
     ("Grocery", "EXPENSE", "shopping-bag"),
     ("Vegetables", "EXPENSE", "carrot"),
+    ("Fruits", "EXPENSE", "apple"),
+    ("Snacks", "EXPENSE", "cookie"),
+    ("Food", "EXPENSE", "utensils"),
+    ("Rent", "EXPENSE", "house"),
+    ("Electricity", "EXPENSE", "zap"),
+    ("Transport", "EXPENSE", "car"),
+    ("Shopping", "EXPENSE", "shopping-bag"),
+    ("Medical", "EXPENSE", "heart-pulse"),
+    ("Education", "EXPENSE", "book-open"),
+    ("Entertainment", "EXPENSE", "clapperboard"),
+    ("Bills", "EXPENSE", "wifi"),
+    ("Other", "EXPENSE", "circle-ellipsis"),
     ("Milk & Dairy", "EXPENSE", "milk"),
     ("Petrol", "EXPENSE", "car"),
     ("Cleaning", "EXPENSE", "sparkles"),
     ("Internet", "EXPENSE", "wifi"),
     ("Salary", "INCOME", "wallet"),
     ("Freelancing", "INCOME", "briefcase"),
+    ("Business", "INCOME", "building"),
+    ("Bonus", "INCOME", "badge-percent"),
+    ("Other income", "INCOME", "circle-plus"),
 ]
 
 

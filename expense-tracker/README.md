@@ -1,113 +1,90 @@
-# Bachelor Expense Tracker
+# Pennywise Expense Tracker
 
-A full-stack expense management project built with Django REST Framework and React.
+Pennywise is a responsive React/Vite client backed by a Django REST API. SQLite is used for local development; PostgreSQL is configured through `DATABASE_URL` for production. Web and future mobile clients communicate only with the HTTPS API, never directly with the database.
 
-## Stack
-- Frontend: React + Vite + JavaScript + Tailwind CSS + React Router + Axios + Recharts + Lucide
-- Backend: Django + Django REST Framework + JWT
-- Database: MySQL ready, with SQLite fallback for local development when MySQL is not installed
+## Project layout
 
-## Project structure
-- `backend/` — Django application
-- `frontend/` — Vite React app
+- `backend/` Django REST Framework API, accounts, expense models, migrations, and database tools
+- `frontend/` React/Vite application
+- `backend/db.sqlite3` local development database (existing data is preserved)
 
-## Quick start
+## Local Windows setup
 
-### 1. MySQL database creation
-If you want to use MySQL, create a database:
+From the `expense-tracker` directory, create `backend/.env` from `backend/.env.example` and replace `SECRET_KEY` with a random value. The defaults use SQLite and the local Vite origins.
 
-```sql
-CREATE DATABASE expense_tracker;
-```
-
-Then update `backend/.env` with your credentials.
-
-### 2. Backend installation
-```bash
-cd expense-tracker/backend
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 3. Environment variables
-Create `backend/.env` from the sample:
-
-```env
-SECRET_KEY=your-secret-key
-DEBUG=True
-DB_NAME=
-DB_USER=root
-DB_PASSWORD=
-DB_HOST=localhost
-DB_PORT=3306
-EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
-```
-
-> Leave `DB_NAME` empty to use the SQLite fallback automatically in local development.
-> The console email backend prints verification codes in the backend terminal. For real email, set `EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL` in `backend/.env`.
-
-### 4. Django migrations
-```bash
-python manage.py makemigrations accounts expenses
+```powershell
+cd backend
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python manage.py check
+python manage.py makemigrations
 python manage.py migrate
+python manage.py runserver 127.0.0.1:8000
 ```
 
-### 5. Create admin user
-```bash
-python manage.py createsuperuser
-```
+In a second terminal:
 
-### 6. Seed demo data
-```bash
-python manage.py seed_data
-```
-
-Demo login:
-- Email: `demo@expense.com`
-- Password: `demo1234`
-
-### 7. Run backend server
-```bash
-python manage.py runserver 0.0.0.0:8000
-```
-
-### 8. Frontend setup
-```bash
-cd ../frontend
+```powershell
+cd frontend
 npm install
 npm run dev
 ```
 
-Visit `http://localhost:5173` to open the app.
+Open the Vite URL printed in the terminal, normally `http://localhost:5173`. New accounts require email verification; the local console email backend prints the OTP in the Django terminal. Use SMTP environment variables for real email delivery.
 
-### 9. Test login and CRUD operations
-- Login with the demo account or create a new user via the registration page.
-- Use the dashboard to verify totals and recent transactions.
-- Add expense and income records via the API or frontend when connected.
+For a local frontend API override, copy `frontend/.env.example` to `frontend/.env.local`. Set `VITE_API_BASE_URL` to the API root, normally `http://127.0.0.1:8000/api`.
 
-## API base URL
-The frontend uses:
+## Database
 
-```text
-http://127.0.0.1:8000/api
+The development default is `backend/db.sqlite3`. `DATABASE_URL=sqlite:///db.sqlite3` uses that file when Django runs from `backend/`. For inspection, table names, queries, and backup instructions, see [backend/sql/README.md](backend/sql/README.md) and [backend/sql/queries.sql](backend/sql/queries.sql).
+
+Production uses a provider-issued PostgreSQL connection URL in `DATABASE_URL`; do not put credentials in source control or frontend variables. Run migrations during deployment. Existing SQLite data is not automatically copied to PostgreSQL; use a planned export/import when promoting real data.
+
+## API
+
+All private endpoints require `Authorization: Bearer <access-token>`. JWT access tokens expire after one day and refresh tokens after seven days. The API scopes personal records to the authenticated account.
+
+- Authentication: `POST /api/auth/register/`, `/login/`, `/logout/`, `/refresh/`, `/verify-otp/`, `/resend-otp/`
+- Current user/profile: `GET /api/auth/profile/`, `PUT /api/auth/profile/`, `GET /api/profile/`
+- Expenses: `GET/POST /api/expenses/`, `GET/PUT/PATCH/DELETE /api/expenses/{id}/`
+- Income: `GET/POST /api/income/`, `GET/PUT/PATCH/DELETE /api/income/{id}/`
+- Categories: `GET/POST /api/categories/`, standard detail update/delete routes
+- Dashboard: `GET /api/dashboard/`, `GET /api/dashboard/reports/`, `/api/dashboard/monthly/?months=12`, `/api/dashboard/categories/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
+- Health: public `GET /api/health/` returns `{"status":"ok"}`
+
+Expense and income lists support `search`, `category`, `date_from`, and `date_to` query parameters. Example: `/api/expenses/?search=market&category=3&date_from=2026-01-01&date_to=2026-01-31`. The API returns JSON arrays for lists to preserve the existing client contract.
+
+## Production deployment
+
+Set backend environment variables in the host dashboard or secret manager:
+
+- `SECRET_KEY`: a unique, high-entropy value
+- `DEBUG=False`
+- `ALLOWED_HOSTS`: comma-separated backend hostnames, without schemes
+- `CORS_ALLOWED_ORIGINS`: exact HTTPS frontend origins
+- `CSRF_TRUSTED_ORIGINS`: exact trusted HTTPS origins
+- `DATABASE_URL`: provider-issued PostgreSQL URL
+- SMTP settings for account verification email
+
+Install `backend/requirements.txt`, then run `python manage.py migrate` and `python manage.py collectstatic --noinput`. Start the WSGI app on Linux hosts with `gunicorn config.wsgi:application --bind 0.0.0.0:$PORT` from `backend/`. The settings enable PostgreSQL SSL in production, HTTPS redirects, secure session/CSRF cookies, proxy HTTPS recognition, and WhiteNoise static serving. Terminate HTTPS at the platform or reverse proxy.
+
+For Render/Railway/VPS, configure the same environment values and commands in the service settings. Run database migrations as a release/pre-deploy command. Configure a persistent PostgreSQL service and back it up using the provider's managed backup process. Keep frontend and API origins restricted to the deployed domains.
+
+Build the frontend with `npm ci && npm run build` from `frontend/`, setting `VITE_API_BASE_URL` at build time to `https://your-api-domain.example/api`. Deploy `frontend/dist` to a static host with SPA fallback/rewrite to `index.html`; allow browser requests to the API origin via the backend CORS allowlist. The Vite variable is public configuration, so never place secrets in `VITE_*` variables.
+
+## Mobile clients
+
+React Native, Flutter, and other clients use the same HTTPS REST API and JSON payloads. Register/login, store JWTs using the platform's secure storage, send the access token as a Bearer header, refresh before expiry, and call logout with the refresh token. Scope is enforced by the API user, and no mobile client should connect directly to SQLite or PostgreSQL.
+
+## Verification
+
+```powershell
+cd backend
+python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py migrate
+python manage.py test accounts expenses
+cd ..\frontend
+npm run build
 ```
-
-## Included auth endpoints
-- `POST /api/auth/register/`
-- `POST /api/auth/verify-otp/`
-- `POST /api/auth/resend-otp/`
-- `POST /api/auth/login/`
-- `POST /api/auth/refresh/`
-- `POST /api/auth/logout/`
-- `GET /api/auth/profile/`
-- `PUT /api/auth/profile/`
-- `POST /api/auth/change-password/`
-
-New registrations stay inactive until their six-digit email code is verified. Codes expire after 10 minutes and are limited to five verification attempts. Newly created expenses, income, categories, people, budgets, and savings goals create in-app notifications for the owning account.
-
-## Notes
-- JWT is enabled with Django REST Framework Simple JWT.
-- All private routes are protected.
-- Current database config uses SQLite for this environment because MySQL is not installed locally.
-- For production, configure MySQL in the `.env` file and install `mysqlclient`.

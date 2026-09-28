@@ -1,8 +1,6 @@
 from django.contrib.auth import password_validation
 from rest_framework import serializers
 
-from expenses.models import Category
-
 from .models import User
 
 
@@ -36,19 +34,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         validated_data.pop("confirm_password")
         password = validated_data.pop("password")
         user = User.objects.create_user(password=password, is_active=False, **validated_data)
-
-        default_categories = [
-            ("Grocery", "EXPENSE", "shopping-bag"),
-            ("Transportation", "EXPENSE", "car"),
-            ("Bills", "EXPENSE", "wifi"),
-            ("Food & Dining", "EXPENSE", "utensils"),
-            ("Salary", "INCOME", "wallet"),
-            ("Freelancing", "INCOME", "briefcase"),
-        ]
-
-        for name, category_type, icon in default_categories:
-            Category.objects.get_or_create(user=user, name=name, type=category_type, defaults={"icon": icon})
-
         return user
 
 

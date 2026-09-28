@@ -137,6 +137,8 @@ class SettlementTransactionSerializer(serializers.ModelSerializer):
 
 
 class ExpenseSerializer(serializers.ModelSerializer):
+    notes = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
     category_name = serializers.SerializerMethodField()
     person_name = serializers.SerializerMethodField()
     user_name = serializers.SerializerMethodField()
@@ -153,6 +155,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
             "user_name",
             "amount",
             "description",
+            "notes",
             "date",
             "payment_method",
             "created_at",
@@ -172,6 +175,13 @@ class ExpenseSerializer(serializers.ModelSerializer):
     def validate_category(self, value):
         if value.user_id != self.context["request"].user.id:
             raise serializers.ValidationError("Choose one of your own categories.")
+        if value.type != "EXPENSE":
+            raise serializers.ValidationError("Choose an expense category.")
+        return value
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Amount must be greater than zero.")
         return value
 
     def validate_person(self, value):
@@ -181,6 +191,8 @@ class ExpenseSerializer(serializers.ModelSerializer):
 
 
 class IncomeSerializer(serializers.ModelSerializer):
+    notes = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
     category_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -192,6 +204,7 @@ class IncomeSerializer(serializers.ModelSerializer):
             "category_name",
             "amount",
             "description",
+            "notes",
             "date",
             "payment_method",
             "created_at",
@@ -201,6 +214,18 @@ class IncomeSerializer(serializers.ModelSerializer):
 
     def get_category_name(self, obj):
         return obj.category.name
+
+    def validate_category(self, value):
+        if value.user_id != self.context["request"].user.id:
+            raise serializers.ValidationError("Choose one of your own categories.")
+        if value.type != "INCOME":
+            raise serializers.ValidationError("Choose an income category.")
+        return value
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Amount must be greater than zero.")
+        return value
 
 
 class BudgetSerializer(serializers.ModelSerializer):

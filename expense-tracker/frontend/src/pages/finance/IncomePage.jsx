@@ -13,7 +13,10 @@ export default function IncomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
-  const [form, setForm] = useState({ id: null, category: '', amount: '', description: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [form, setForm] = useState({ id: null, category: '', amount: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
 
   const loadData = async () => {
     try {
@@ -37,7 +40,10 @@ export default function IncomePage() {
   const filteredIncome = income.filter((item) => {
     const search = query.trim().toLowerCase();
     if (!search) return true;
-    return [item.category_name, item.description, item.payment_method].join(' ').toLowerCase().includes(search);
+    return [item.category_name, item.description, item.notes, item.payment_method].join(' ').toLowerCase().includes(search)
+      && (!dateFrom || item.date >= dateFrom)
+      && (!dateTo || item.date <= dateTo)
+      && (!categoryFilter || String(item.category) === categoryFilter);
   });
 
   const handleSubmit = async (e) => {
@@ -47,6 +53,7 @@ export default function IncomePage() {
         category: Number(form.category),
         amount: Number(form.amount),
         description: form.description,
+        notes: form.notes,
         date: form.date,
         payment_method: form.payment_method,
       };
@@ -57,7 +64,7 @@ export default function IncomePage() {
         await api.post('/income/', payload);
       }
 
-      setForm({ id: null, category: '', amount: '', description: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+      setForm({ id: null, category: '', amount: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
       loadData();
     } catch (err) {
       setError(err.response?.data?.detail || 'Unable to save income record.');
@@ -70,6 +77,7 @@ export default function IncomePage() {
       category: item.category,
       amount: item.amount,
       description: item.description || '',
+      notes: item.notes || '',
       date: item.date,
       payment_method: item.payment_method,
     });
@@ -93,14 +101,14 @@ export default function IncomePage() {
             <p className="text-sm text-slate-500">{t('Cashflow')}</p>
             <h1 className="text-3xl font-bold text-slate-900">{t('Income')}</h1>
           </div>
-          <button type="button" className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500">
+          <button type="button" onClick={() => document.getElementById('income-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500">
             <Plus className="h-4 w-4" /> {t('Add income')}
           </button>
         </div>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <form id="income-form" onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-xl font-semibold text-slate-900">{t(form.id ? 'Edit income' : 'Add income')}</h2>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">{t('Category')}</label>
@@ -116,6 +124,10 @@ export default function IncomePage() {
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">{t('Description')}</label>
             <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 focus:border-emerald-400" required />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">{t('Notes')}</label>
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} maxLength={2000} className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 focus:border-emerald-400" />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -141,6 +153,12 @@ export default function IncomePage() {
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Search income')} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm focus:border-emerald-400" />
             </div>
           </div>
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-xs font-medium text-slate-600">{t('From')}<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900" /></label>
+            <label className="text-xs font-medium text-slate-600">{t('To')}<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900" /></label>
+            <label className="text-xs font-medium text-slate-600">{t('Category')}<select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900"><option value="">{t('All categories')}</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); setCategoryFilter(''); setQuery(''); }} className="self-end min-h-11 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('Clear filters')}</button>
+          </div>
 
           {loading ? (
             <div className="py-10 text-center text-slate-500">{t('Loading income...')}</div>
@@ -159,6 +177,7 @@ export default function IncomePage() {
                     <div>
                       <h3 className="font-semibold text-slate-900">{item.category_name}</h3>
                       <p className="mt-1 text-sm text-slate-600">{item.description || t('Income entry')}</p>
+                      {item.notes && <p className="mt-1 whitespace-pre-wrap text-sm text-slate-500">{item.notes}</p>}
                     </div>
                     <span className="text-lg font-bold text-emerald-600">{localizedMoney.format(Number(item.amount))}</span>
                   </div>

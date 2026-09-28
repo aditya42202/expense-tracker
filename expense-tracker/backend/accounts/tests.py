@@ -26,6 +26,30 @@ class AuthFlowTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertGreaterEqual(Category.objects.filter(user__email="jane@example.com").count(), 2)
         user = User.objects.get(email="jane@example.com")
+        category_names = set(Category.objects.filter(user=user).values_list("name", flat=True))
+        self.assertTrue(
+            {
+                "Grocery",
+                "Vegetables",
+                "Fruits",
+                "Snacks",
+                "Food",
+                "Rent",
+                "Electricity",
+                "Transport",
+                "Shopping",
+                "Medical",
+                "Education",
+                "Entertainment",
+                "Bills",
+                "Other",
+                "Salary",
+                "Freelancing",
+                "Business",
+                "Bonus",
+                "Other income",
+            }.issubset(category_names)
+        )
         self.assertFalse(user.is_active)
         self.assertEqual(client.post("/api/auth/login/", {"email": payload["email"], "password": payload["password"]}, format="json").status_code, 400)
 
@@ -56,3 +80,32 @@ class AuthFlowTests(TestCase):
         notification = Notification.objects.get(user=user)
         self.assertEqual(notification.title, "Person added")
         self.assertIn("Sam", notification.message)
+
+    def test_logout_blacklists_refresh_token(self):
+        user = User.objects.create_user(
+            email="logout@example.com",
+            name="Logout User",
+            password="StrongPass123",
+        )
+        client = APIClient()
+        login = client.post(
+            "/api/auth/login/",
+            {"email": user.email, "password": "StrongPass123"},
+            format="json",
+        )
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.json()['access']}")
+
+        logout = client.post(
+            "/api/auth/logout/",
+            {"refresh": login.json()["refresh"]},
+            format="json",
+        )
+        refresh = client.post(
+            "/api/auth/refresh/",
+            {"refresh": login.json()["refresh"]},
+            format="json",
+        )
+
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(logout.status_code, 200)
+        self.assertEqual(refresh.status_code, 401)

@@ -18,7 +18,10 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
-  const [form, setForm] = useState({ id: null, category: '', person: '', amount: '', description: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [form, setForm] = useState({ id: null, category: '', person: '', amount: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
 
   const loadData = async () => {
     try {
@@ -44,8 +47,10 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
 
   const filteredExpenses = useMemo(() => {
     const list = [...expenses].filter((item) => {
-      const matchesQuery = !query || [item.description, item.category_name, item.person_name, item.payment_method].join(' ').toLowerCase().includes(query.toLowerCase());
-      return matchesQuery;
+      const matchesQuery = !query || [item.description, item.notes, item.category_name, item.person_name, item.payment_method].join(' ').toLowerCase().includes(query.toLowerCase());
+      const matchesDate = (!dateFrom || item.date >= dateFrom) && (!dateTo || item.date <= dateTo);
+      const matchesCategory = !categoryFilter || String(item.category) === categoryFilter;
+      return matchesQuery && matchesDate && matchesCategory;
     });
 
     switch (sort) {
@@ -58,7 +63,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
       default:
         return list.sort((a, b) => new Date(b.date) - new Date(a.date));
     }
-  }, [expenses, query, sort]);
+  }, [expenses, query, sort, dateFrom, dateTo, categoryFilter]);
 
   const personTotals = useMemo(() => people.map((person) => {
     const personExpenses = expenses.filter((expense) => expense.person === person.id);
@@ -115,6 +120,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
         person: form.person ? Number(form.person) : null,
         amount: Number(form.amount),
         description: form.description,
+        notes: form.notes,
         date: form.date,
         payment_method: form.payment_method,
       };
@@ -126,7 +132,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
       }
 
       onExpenseChange();
-      setForm({ id: null, category: '', person: '', amount: '', description: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+      setForm({ id: null, category: '', person: '', amount: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
       loadData();
     } catch (err) {
       setError(err.response?.data?.detail || 'Unable to save expense.');
@@ -178,6 +184,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
       person: item.person ? String(item.person) : '',
       amount: item.amount,
       description: item.description || '',
+      notes: item.notes || '',
       date: item.date,
       payment_method: item.payment_method,
     });
@@ -287,8 +294,8 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
         </section>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-xl font-semibold text-slate-900">{t(form.id ? 'Edit expense' : 'Create expense')}</h2>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">{t('Category')}</label>
@@ -322,6 +329,11 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
             <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-900 focus:border-indigo-400" required />
           </div>
 
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">{t('Notes')}</label>
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} maxLength={2000} className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-900 focus:border-indigo-400" />
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">{t('Date')}</label>
@@ -340,7 +352,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
           </button>
         </form>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative w-full sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -352,6 +364,12 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
               <option value="highest">{t('Highest amount')}</option>
               <option value="lowest">{t('Lowest amount')}</option>
             </select>
+          </div>
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-xs font-medium text-slate-600">{t('From')}<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900" /></label>
+            <label className="text-xs font-medium text-slate-600">{t('To')}<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900" /></label>
+            <label className="text-xs font-medium text-slate-600">{t('Category')}<select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900"><option value="">{t('All categories')}</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); setCategoryFilter(''); setQuery(''); }} className="self-end min-h-11 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('Clear filters')}</button>
           </div>
 
           {loading ? (

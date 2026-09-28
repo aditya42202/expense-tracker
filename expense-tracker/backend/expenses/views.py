@@ -1,8 +1,9 @@
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Q, Sum
+from django.utils.dateparse import parse_date
 from django.utils import timezone
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -25,9 +26,48 @@ from .serializers import (
 )
 
 
-def _build_category_summary(user):
+def _date_range(request):
+    start_date = request.query_params.get("date_from")
+    end_date = request.query_params.get("date_to")
+    if start_date and not parse_date(start_date):
+        raise serializers.ValidationError({"date_from": "Enter a valid date in YYYY-MM-DD format."})
+    if end_date and not parse_date(end_date):
+        raise serializers.ValidationError({"date_to": "Enter a valid date in YYYY-MM-DD format."})
+    if start_date and end_date and start_date > end_date:
+        raise serializers.ValidationError({"date_to": "The end date must be on or after the start date."})
+    return start_date, end_date
+
+
+def _filter_transactions(queryset, request):
+    start_date, end_date = _date_range(request)
+    if start_date:
+        queryset = queryset.filter(date__gte=start_date)
+    if end_date:
+        queryset = queryset.filter(date__lte=end_date)
+    category = request.query_params.get("category")
+    if category:
+        if not category.isdigit():
+            raise serializers.ValidationError({"category": "Enter a valid category ID."})
+        queryset = queryset.filter(category_id=category)
+    search = request.query_params.get("search", "").strip()
+    if search:
+        queryset = queryset.filter(
+            Q(description__icontains=search)
+            | Q(notes__icontains=search)
+            | Q(category__name__icontains=search)
+            | Q(payment_method__icontains=search)
+        )
+    return queryset
+
+
+def _build_category_summary(user, start_date=None, end_date=None):
+    expenses = Expense.objects.filter(user=user)
+    if start_date:
+        expenses = expenses.filter(date__gte=start_date)
+    if end_date:
+        expenses = expenses.filter(date__lte=end_date)
     return list(
-        Expense.objects.filter(user=user)
+        expenses
         .values("category__name")
         .annotate(total=Sum("amount"))
         .order_by("-total")[:6]
@@ -101,7 +141,8 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsOwner]
 
     def get_queryset(self):
-        return Expense.objects.filter(user=self.request.user).select_related("category", "person").order_by("-date", "-created_at")
+        queryset = Expense.objects.filter(user=self.request.user).select_related("category", "person")
+        return _filter_transactions(queryset, self.request).order_by("-date", "-created_at")
 
     def perform_create(self, serializer):
         expense = serializer.save(user=self.request.user)
@@ -123,7 +164,8 @@ class IncomeViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsOwner]
 
     def get_queryset(self):
-        return Income.objects.filter(user=self.request.user).select_related("category").order_by("-date", "-created_at")
+        queryset = Income.objects.filter(user=self.request.user).select_related("category")
+        return _filter_transactions(queryset, self.request).order_by("-date", "-created_at")
 
     def perform_create(self, serializer):
         income = serializer.save(user=self.request.user)
@@ -335,7 +377,14 @@ class DashboardViewSet(viewsets.ViewSet):
             "today_expense": float(today_expense),
             "total_savings": float(total_income - total_expense),
             "current_month_expense": float(monthly_expense),
+            "current_month_income": float(
+                Income.objects.filter(user=request.user, date__month=today.month, date__year=today.year)
+                .aggregate(total=Sum("amount"))["total"] or Decimal("0")
+            ),
+            "expense_count": Expense.objects.filter(user=request.user).count(),
+            "income_count": Income.objects.filter(user=request.user).count(),
             "category_breakdown": _build_category_summary(request.user),
+            "highest_expenses": [],
             "monthly_trend": _month_series(request.user, 6),
             "recent_transactions": [],
         }
@@ -369,6 +418,16 @@ class DashboardViewSet(viewsets.ViewSet):
             )
 
         response["recent_transactions"] = sorted(response["recent_transactions"], key=lambda x: x["date"], reverse=True)[:10]
+        response["highest_expenses"] = [
+            {
+                "id": item.id,
+                "date": item.date,
+                "category": item.category.name,
+                "description": item.description,
+                "amount": float(item.amount),
+            }
+            for item in Expense.objects.filter(user=request.user).select_related("category").order_by("-amount", "-date")[:5]
+        ]
         return Response(response)
 
     @action(detail=False, methods=["get"], url_path="reports")
@@ -385,7 +444,25 @@ class DashboardViewSet(viewsets.ViewSet):
             "category_breakdown": aggregate["category_breakdown"],
             "monthly_trend": aggregate["monthly_trend"],
             "recent_transactions": aggregate["recent_transactions"],
+            "expense_count": aggregate["expense_count"],
+            "income_count": aggregate["income_count"],
+            "highest_expenses": aggregate["highest_expenses"],
         })
+
+    @action(detail=False, methods=["get"], url_path="monthly")
+    def monthly(self, request):
+        try:
+            months = int(request.query_params.get("months", 12))
+        except ValueError:
+            raise serializers.ValidationError({"months": "Enter a number between 1 and 24."})
+        if not 1 <= months <= 24:
+            raise serializers.ValidationError({"months": "Enter a number between 1 and 24."})
+        return Response({"monthly_trend": _month_series(request.user, months)})
+
+    @action(detail=False, methods=["get"], url_path="categories")
+    def categories(self, request):
+        start_date, end_date = _date_range(request)
+        return Response({"category_breakdown": _build_category_summary(request.user, start_date, end_date)})
 
 
 class ProfileViewSet(viewsets.ViewSet):

@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/staticfiles/
+frontend/.env.local
+frontend/.env.*.local
+frontend/node_modules/
+frontend/dist/

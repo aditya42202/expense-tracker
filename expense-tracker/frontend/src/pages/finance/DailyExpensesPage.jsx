@@ -13,7 +13,7 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
   const [expenses, setExpenses] = useState([]);
   const [newPersonName, setNewPersonName] = useState('');
   const [summary, setSummary] = useState({ today_expense: 0, current_month_expense: 0, monthly_budget: 0, budget_remaining: 0 });
-  const [form, setForm] = useState({ amount: '', category: '', person: '', description: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+  const [form, setForm] = useState({ amount: '', category: '', person: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -58,7 +58,7 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
       });
       onExpenseChange();
       setMessage('Expense added successfully.');
-      setForm({ amount: '', category: '', person: '', description: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+      setForm({ amount: '', category: '', person: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
       await loadData();
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Unable to save expense.');
@@ -88,8 +88,8 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><h1 className="mt-2 text-3xl font-bold">{t('Track today’s spending')}</h1><p className="mt-2 text-sm text-indigo-100">{t('Personal expense ya group expense, dono yahin se add karein.')}</p></div><Link to="/group-expenses" className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50">{t('Add group expense')}</Link></div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr]">
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[1.2fr,0.8fr]">
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">{t('Amount')}</label>
@@ -109,6 +109,11 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">{t('Description')}</label>
             <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder={t('Potato + Onion')} required />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">{t('Notes')}</label>
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} maxLength={2000} className="w-full resize-y rounded-xl border border-slate-300 px-3 py-2.5" />
           </div>
 
           <div>
@@ -145,7 +150,7 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
           </button>
         </form>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-xl font-bold text-slate-900">{t('Today’s Snapshot')}</h2>
           <div className="mt-5 space-y-4">
             <div className="rounded-xl bg-slate-50 p-4">
