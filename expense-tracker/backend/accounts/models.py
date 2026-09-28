@@ -56,10 +56,16 @@ class User(AbstractBaseUser, PermissionsMixin):
 
 
 class EmailOTP(models.Model):
+    PURPOSE_CHOICES = [
+        ("registration", "Registration"),
+        ("login", "Login"),
+    ]
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="email_otp")
     code_hash = models.CharField(max_length=128)
     expires_at = models.DateTimeField()
     attempts = models.PositiveSmallIntegerField(default=0)
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, default="registration")
     created_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

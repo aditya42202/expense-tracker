@@ -43,9 +43,9 @@ Production uses a provider-issued PostgreSQL connection URL in `DATABASE_URL`; d
 
 ## API
 
-All private endpoints require `Authorization: Bearer <access-token>`. JWT access tokens expire after one day and refresh tokens after seven days. The API scopes personal records to the authenticated account.
+All private endpoints require `Authorization: Bearer <access-token>`. Sign-in requires a valid password followed by a six-digit code sent to the account email; the API issues access/refresh JWTs only after code verification. Login codes expire in 10 minutes, allow five attempts, and can be resent after the cooldown. JWT access tokens expire after one day and refresh tokens after seven days. The API scopes personal records to the authenticated account.
 
-- Authentication: `POST /api/auth/register/`, `/login/`, `/logout/`, `/refresh/`, `/verify-otp/`, `/resend-otp/`
+- Authentication: `POST /api/auth/register/`, `/login/`, `/login/verify-otp/`, `/login/resend-otp/`, `/logout/`, `/refresh/`, `/verify-otp/`, `/resend-otp/`
 - Current user/profile: `GET /api/auth/profile/`, `PUT /api/auth/profile/`, `GET /api/profile/`
 - Expenses: `GET/POST /api/expenses/`, `GET/PUT/PATCH/DELETE /api/expenses/{id}/`
 - Income: `GET/POST /api/income/`, `GET/PUT/PATCH/DELETE /api/income/{id}/`

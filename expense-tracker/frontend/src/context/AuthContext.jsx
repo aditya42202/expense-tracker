@@ -37,10 +37,20 @@ export function AuthProvider({ children }) {
 
   const login = async (payload) => {
     const { data } = await api.post('/auth/login/', payload);
+    return data;
+  };
+
+  const verifyLoginOtp = async (payload) => {
+    const { data } = await api.post('/auth/login/verify-otp/', payload);
     localStorage.setItem('access_token', data.access);
     localStorage.setItem('refresh_token', data.refresh);
     localStorage.setItem('user', JSON.stringify(data.user));
     setUser(data.user);
+    return data;
+  };
+
+  const resendLoginOtp = async (payload) => {
+    const { data } = await api.post('/auth/login/resend-otp/', payload);
     return data;
   };
 
@@ -76,7 +86,7 @@ export function AuthProvider({ children }) {
   };
 
   const value = useMemo(
-    () => ({ user, loading, login, register, verifyEmail, resendOtp, logout, setUser }),
+    () => ({ user, loading, login, verifyLoginOtp, resendLoginOtp, register, verifyEmail, resendOtp, logout, setUser }),
     [user, loading],
   );
 

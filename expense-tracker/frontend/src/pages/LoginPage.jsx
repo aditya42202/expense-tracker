@@ -1,4 +1,4 @@
-import { Eye, EyeOff, LockKeyhole, Mail, Sparkles, WalletCards } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck, Sparkles, WalletCards } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -10,23 +10,68 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const { login } = useAuth();
+  const [otpRequested, setOtpRequested] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [message, setMessage] = useState('');
+  const { login, verifyLoginOtp, resendLoginOtp } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setMessage('');
 
     try {
-      await login({ email: form.email.trim(), password: form.password });
-      navigate('/dashboard');
+      const result = await login({ email: form.email.trim(), password: form.password });
+      setForm((current) => ({ ...current, email: result.email || current.email.trim(), password: '' }));
+      setOtpRequested(true);
+      setMessage(result.message || 'A login code has been sent to your email.');
     } catch (err) {
-      const message = err.response?.data?.non_field_errors?.[0] || err.response?.data?.email?.[0] || err.response?.data?.detail || 'Login failed.';
-      setError(message);
+      const responseData = err.response?.data;
+      const errorMessage = responseData?.non_field_errors?.[0]
+        || responseData?.email?.[0]
+        || responseData?.detail
+        || 'Login failed.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerifyOtp = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      await verifyLoginOtp({ email: form.email.trim(), otp: otpCode });
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Unable to verify the login code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await resendLoginOtp({ email: form.email.trim() });
+      setMessage(result.message);
+    } catch {
+      setError('Unable to resend the login code. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const changeEmail = () => {
+    setOtpRequested(false);
+    setOtpCode('');
+    setError('');
+    setMessage('');
   };
 
   return (
@@ -74,11 +119,11 @@ export default function LoginPage() {
         <div className="flex items-center justify-center p-6 sm:p-10">
           <div className="w-full max-w-md">
             <div className="mb-8 text-center lg:text-left">
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600">{t('Welcome back')}</p>
-              <h3 className="mt-2 text-3xl font-bold text-slate-900">{t('Sign in to your account')}</h3>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600">{t(otpRequested ? 'Email verification' : 'Welcome back')}</p>
+              <h3 className="mt-2 text-3xl font-bold text-slate-900">{t(otpRequested ? 'Enter your login code' : 'Sign in to your account')}</h3>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            {!otpRequested ? <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">{t('Email address')}</label>
                 <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100">
@@ -125,12 +170,46 @@ export default function LoginPage() {
               <button type="submit" disabled={loading} className="flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400">
                 {loading ? t('Signing in...') : t('Login')}
               </button>
-            </form>
+            </form> : (
+              <form onSubmit={handleVerifyOtp} className="space-y-5">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-emerald-900"><ShieldCheck className="h-4 w-4" />{t('Check your email')}</p>
+                  <p className="mt-1 break-all text-sm text-emerald-800">{form.email}</p>
+                  <p className="mt-2 text-xs leading-relaxed text-emerald-800">{t('The six-digit code expires in 10 minutes.')}</p>
+                </div>
+                <div>
+                  <label htmlFor="login-otp" className="mb-2 block text-sm font-medium text-slate-700">{t('Email verification code')}</label>
+                  <input
+                    id="login-otp"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={otpCode}
+                    onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-center text-xl font-semibold tracking-[0.3em] text-slate-900 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-100"
+                    placeholder="000000"
+                    required
+                  />
+                </div>
+                {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{t(error)}</p>}
+                {message && <p role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-700">{t(message)}</p>}
+                <button type="submit" disabled={loading || otpCode.length !== 6} className="flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400">
+                  {loading ? t('Verifying...') : t('Verify and sign in')}
+                </button>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                  <button type="button" onClick={changeEmail} className="inline-flex min-h-10 items-center gap-1 font-medium text-slate-600 hover:text-slate-900"><ArrowLeft className="h-4 w-4" />{t('Change email or password')}</button>
+                  <button type="button" onClick={handleResendOtp} disabled={loading} className="min-h-10 font-semibold text-indigo-600 hover:text-indigo-500 disabled:text-slate-400">{t('Resend code')}</button>
+                </div>
+              </form>
+            )}
 
-            <p className="mt-7 text-center text-sm text-slate-600">
+            {!otpRequested && <p className="mt-7 text-center text-sm text-slate-600">
               {t('Don’t have an account?')}{' '}
               <Link to="/register" className="font-semibold text-indigo-600 hover:text-indigo-500">{t('Create one')}</Link>
-            </p>
+            </p>}
+            <p className="mt-5 text-center text-sm"><Link to="/" className="font-medium text-slate-500 hover:text-slate-800">{t('Back to home')}</Link></p>
           </div>
         </div>
       </div>
