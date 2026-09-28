@@ -11,6 +11,13 @@ const strengthConfig = [
   { label: 'Strong', color: 'bg-emerald-600' },
 ];
 
+const firstErrorMessage = (value) => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(firstErrorMessage).find(Boolean) || '';
+  if (value && typeof value === 'object') return Object.values(value).map(firstErrorMessage).find(Boolean) || '';
+  return '';
+};
+
 export default function RegisterPage() {
   const { language, setLanguage, t } = useLanguage();
   const [form, setForm] = useState({ name: '', email: '', group: 'Personal', password: '', confirm_password: '' });
@@ -64,11 +71,8 @@ export default function RegisterPage() {
       setVerificationPending(true);
       setSuccess(result.message || 'Enter the verification code sent to your email.');
     } catch (err) {
-      const errors = err.response?.data;
-      const firstError = errors && typeof errors === 'object'
-        ? Object.values(errors).flat().find(Boolean) || 'Registration failed.'
-        : 'Registration failed.';
-      setError(firstError);
+      const backendError = firstErrorMessage(err.response?.data);
+      setError(backendError || (err.response ? 'Registration failed.' : 'Unable to connect to the server. Please try again.'));
     } finally {
       setLoading(false);
     }

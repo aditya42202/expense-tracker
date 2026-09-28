@@ -10,14 +10,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_DIR = BASE_DIR.parent
 load_dotenv(BASE_DIR / ".env")
 
-DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes")
+DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     if not DEBUG:
         raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG is disabled.")
     SECRET_KEY = secrets.token_urlsafe(50)
 
-ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if host.strip()]
+allowed_hosts = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
+render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+if render_hostname:
+    allowed_hosts = f"{allowed_hosts},{render_hostname}"
+ALLOWED_HOSTS = [host.strip() for host in allowed_hosts.split(",") if host.strip()]
 cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
 csrf_origins = os.getenv("CSRF_TRUSTED_ORIGINS", cors_origins)
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
@@ -68,7 +72,14 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{(BASE_DIR / 'db.sqlite3').as_posix()}"
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    if not DEBUG:
+        raise ImproperlyConfigured("DATABASE_URL must be set when DEBUG is disabled.")
+    DATABASE_URL = f"sqlite:///{(BASE_DIR / 'db.sqlite3').as_posix()}"
+elif not DEBUG and DATABASE_URL.lower().startswith("sqlite:"):
+    raise ImproperlyConfigured("Production requires a persistent database; configure DATABASE_URL with PostgreSQL.")
+
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,

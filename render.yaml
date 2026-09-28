@@ -24,9 +24,9 @@ services:
       - key: ALLOWED_HOSTS
         value: .onrender.com
       - key: CORS_ALLOWED_ORIGINS
-        value: https://pennywise-expense-tracker-ten.vercel.app
+        value: https://pennywise-expense-tracker-ten.vercel.app,https://wise-expense-tracker-ten.vercel.app
       - key: CSRF_TRUSTED_ORIGINS
-        value: https://pennywise-expense-tracker-ten.vercel.app
+        value: https://pennywise-expense-tracker-ten.vercel.app,https://wise-expense-tracker-ten.vercel.app
       - key: EMAIL_BACKEND
         value: django.core.mail.backends.smtp.EmailBackend
       - key: EMAIL_HOST

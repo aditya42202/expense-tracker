@@ -1,4 +1,6 @@
 from django.contrib.auth import password_validation
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
 from .models import User
@@ -20,8 +22,11 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
 
         try:
-            password_validation.validate_password(password)
-        except serializers.ValidationError as exc:
+            password_validation.validate_password(
+                password,
+                user=User(name=attrs.get("name", ""), email=attrs.get("email", "")),
+            )
+        except DjangoValidationError as exc:
             raise serializers.ValidationError({"password": exc.messages})
 
         email = attrs.get("email")
@@ -33,8 +38,14 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("confirm_password")
         password = validated_data.pop("password")
-        user = User.objects.create_user(password=password, is_active=False, **validated_data)
-        return user
+        email = validated_data["email"]
+        try:
+            with transaction.atomic():
+                return User.objects.create_user(password=password, is_active=False, **validated_data)
+        except IntegrityError:
+            if User.objects.filter(email__iexact=email).exists():
+                raise serializers.ValidationError({"email": "A user with this email already exists."})
+            raise
 
 
 class LoginSerializer(serializers.Serializer):

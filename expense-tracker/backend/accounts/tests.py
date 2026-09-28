@@ -26,6 +26,8 @@ class AuthFlowTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertGreaterEqual(Category.objects.filter(user__email="jane@example.com").count(), 2)
         user = User.objects.get(email="jane@example.com")
+        self.assertTrue(user.check_password(payload["password"]))
+        self.assertNotEqual(user.password, payload["password"])
         category_names = set(Category.objects.filter(user=user).values_list("name", flat=True))
         self.assertTrue(
             {
@@ -84,6 +86,39 @@ class AuthFlowTests(TestCase):
         )
         self.assertEqual(token_response.status_code, 200)
         self.assertIn("access", token_response.json())
+
+    def test_registration_rejects_invalid_inputs_and_duplicate_emails(self):
+        User.objects.create_user(
+            email="existing@example.com",
+            name="Existing User",
+            password="StrongPass123",
+        )
+        base_payload = {
+            "name": "Jane Doe",
+            "email": "jane@example.com",
+            "group": "Personal",
+            "password": "StrongPass123",
+            "confirm_password": "StrongPass123",
+        }
+        cases = [
+            ("duplicate email", {**base_payload, "email": "Existing@Example.com"}, "email"),
+            ("invalid email", {**base_payload, "email": "not-an-email"}, "email"),
+            ("weak password", {**base_payload, "password": "password", "confirm_password": "password"}, "password"),
+            ("password mismatch", {**base_payload, "confirm_password": "DifferentPass123"}, "confirm_password"),
+            ("missing fields", {}, None),
+        ]
+        client = APIClient()
+
+        for case, payload, expected_field in cases:
+            with self.subTest(case=case):
+                response = client.post("/api/auth/register/", payload, format="json")
+                self.assertEqual(response.status_code, 400)
+                if expected_field:
+                    self.assertIn(expected_field, response.json())
+                else:
+                    self.assertTrue({"name", "email", "password", "confirm_password"}.issubset(response.json()))
+
+        self.assertEqual(User.objects.count(), 1)
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_login_requires_valid_email_code_before_issuing_tokens(self):

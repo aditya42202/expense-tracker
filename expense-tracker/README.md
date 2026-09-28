@@ -39,7 +39,7 @@ For a local frontend API override, copy `frontend/.env.example` to `frontend/.en
 
 The development default is `backend/db.sqlite3`. `DATABASE_URL=sqlite:///db.sqlite3` uses that file when Django runs from `backend/`. For inspection, table names, queries, and backup instructions, see [backend/sql/README.md](backend/sql/README.md) and [backend/sql/queries.sql](backend/sql/queries.sql).
 
-Production uses a provider-issued PostgreSQL connection URL in `DATABASE_URL`; do not put credentials in source control or frontend variables. Run migrations during deployment. Existing SQLite data is not automatically copied to PostgreSQL; use a planned export/import when promoting real data.
+Production requires a provider-issued PostgreSQL connection URL in `DATABASE_URL`; Django rejects a missing or SQLite production URL rather than silently storing data on an ephemeral filesystem. Do not put credentials in source control or frontend variables. Run migrations during deployment. Existing SQLite data is not automatically copied to PostgreSQL; use a planned export/import when promoting real data.
 
 ## API
 
@@ -60,8 +60,8 @@ Expense and income lists support `search`, `category`, `date_from`, and `date_to
 The repository includes a Render Blueprint at the Git root ([`render.yaml`](../render.yaml)) and Vercel SPA routing in `frontend/vercel.json`. Deploy from the connected GitHub repository:
 
 1. In Render, create a new Blueprint from this repository and approve the `pennywise-api` Starter web service plus Basic PostgreSQL database. These are paid Render plans. The Blueprint installs `backend/requirements.txt`, applies migrations and collects static assets before deploy, and uses `/api/health/` as its health check.
-2. The Render Blueprint sets `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS` to the deployed Vercel origin. Add SMTP `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL` in Render's secret environment.
-3. Import the same repository into Vercel and set the Root Directory to `expense-tracker/frontend`, then deploy. `frontend/.env.production` supplies `VITE_API_BASE_URL=https://expense-tracker-l07o.onrender.com/api`; Vercel uses `npm ci`, `npm run build`, `dist`, and rewrites client routes to `index.html`.
+2. The Render Blueprint allows both the previous Vercel origin and `https://wise-expense-tracker-ten.vercel.app` through `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS`. Django includes Render's automatically supplied `RENDER_EXTERNAL_HOSTNAME` in `ALLOWED_HOSTS`. Add SMTP `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL` in Render's environment for verification-code delivery.
+3. Import the same repository into Vercel and set the Root Directory to `expense-tracker/frontend`. Set the Vercel build environment variable `VITE_API_BASE_URL` to `https://expense-tracker-l07o.onrender.com/api` for Production (and Preview only if those deployments should use this API). `frontend/.env.production` provides the same build default; Vercel uses `npm ci`, `npm run build`, `dist`, and rewrites client routes to `index.html`.
 4. Verify `https://expense-tracker-l07o.onrender.com/api/health/` returns `{"status":"ok"}`, then test sign-in and confirm the login OTP arrives by email.
 
 Set backend environment variables in the host dashboard or secret manager:
