@@ -57,6 +57,13 @@ Expense and income lists support `search`, `category`, `date_from`, and `date_to
 
 ## Production deployment
 
+The repository includes a Render Blueprint at the Git root ([`render.yaml`](../render.yaml)) and Vercel SPA routing in `frontend/vercel.json`. Deploy from the connected GitHub repository:
+
+1. In Render, create a new Blueprint from this repository and approve the `pennywise-api` Starter web service plus Basic PostgreSQL database. These are paid Render plans. The Blueprint installs `backend/requirements.txt`, applies migrations and collects static assets before deploy, and uses `/api/health/` as its health check.
+2. In Render's service environment, fill the `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS` values after you know the Vercel URL. Add SMTP `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL`; the Blueprint marks these as unsynced values so credentials are entered in Render's secret environment, not Git.
+3. Import the same repository into Vercel and set the Root Directory to `expense-tracker/frontend`. Add the production environment variable `VITE_API_BASE_URL=https://<render-service-host>/api`, then deploy. Vercel uses `npm ci`, `npm run build`, `dist`, and rewrites client routes to `index.html`.
+4. Copy the deployed Vercel origin (including `https://`) into Render's `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS`, save, and redeploy the API. Verify `https://<render-service-host>/api/health/` returns `{"status":"ok"}`, then test sign-in and confirm the login OTP arrives by email.
+
 Set backend environment variables in the host dashboard or secret manager:
 
 - `SECRET_KEY`: a unique, high-entropy value
@@ -69,7 +76,7 @@ Set backend environment variables in the host dashboard or secret manager:
 
 Install `backend/requirements.txt`, then run `python manage.py migrate` and `python manage.py collectstatic --noinput`. Start the WSGI app on Linux hosts with `gunicorn config.wsgi:application --bind 0.0.0.0:$PORT` from `backend/`. The settings enable PostgreSQL SSL in production, HTTPS redirects, secure session/CSRF cookies, proxy HTTPS recognition, and WhiteNoise static serving. Terminate HTTPS at the platform or reverse proxy.
 
-For Render/Railway/VPS, configure the same environment values and commands in the service settings. Run database migrations as a release/pre-deploy command. Configure a persistent PostgreSQL service and back it up using the provider's managed backup process. Keep frontend and API origins restricted to the deployed domains.
+For Railway/VPS, configure the same environment values and commands in the service settings. Run database migrations as a release/pre-deploy command. Configure a persistent PostgreSQL service and back it up using the provider's managed backup process. Keep frontend and API origins restricted to the deployed domains.
 
 Build the frontend with `npm ci && npm run build` from `frontend/`, setting `VITE_API_BASE_URL` at build time to `https://your-api-domain.example/api`. Deploy `frontend/dist` to a static host with SPA fallback/rewrite to `index.html`; allow browser requests to the API origin via the backend CORS allowlist. The Vite variable is public configuration, so never place secrets in `VITE_*` variables.
 
