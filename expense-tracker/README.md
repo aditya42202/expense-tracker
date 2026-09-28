@@ -60,9 +60,9 @@ Expense and income lists support `search`, `category`, `date_from`, and `date_to
 The repository includes a Render Blueprint at the Git root ([`render.yaml`](../render.yaml)) and Vercel SPA routing in `frontend/vercel.json`. Deploy from the connected GitHub repository:
 
 1. In Render, create a new Blueprint from this repository and approve the `pennywise-api` Starter web service plus Basic PostgreSQL database. These are paid Render plans. The Blueprint installs `backend/requirements.txt`, applies migrations and collects static assets before deploy, and uses `/api/health/` as its health check.
-2. In Render's service environment, fill the `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS` values after you know the Vercel URL. Add SMTP `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL`; the Blueprint marks these as unsynced values so credentials are entered in Render's secret environment, not Git.
-3. Import the same repository into Vercel and set the Root Directory to `expense-tracker/frontend`. Add the production environment variable `VITE_API_BASE_URL=https://<render-service-host>/api`, then deploy. Vercel uses `npm ci`, `npm run build`, `dist`, and rewrites client routes to `index.html`.
-4. Copy the deployed Vercel origin (including `https://`) into Render's `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS`, save, and redeploy the API. Verify `https://<render-service-host>/api/health/` returns `{"status":"ok"}`, then test sign-in and confirm the login OTP arrives by email.
+2. The Render Blueprint sets `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS` to the deployed Vercel origin. Add SMTP `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL` in Render's secret environment.
+3. Import the same repository into Vercel and set the Root Directory to `expense-tracker/frontend`, then deploy. `frontend/.env.production` supplies `VITE_API_BASE_URL=https://expense-tracker-l07o.onrender.com/api`; Vercel uses `npm ci`, `npm run build`, `dist`, and rewrites client routes to `index.html`.
+4. Verify `https://expense-tracker-l07o.onrender.com/api/health/` returns `{"status":"ok"}`, then test sign-in and confirm the login OTP arrives by email.
 
 Set backend environment variables in the host dashboard or secret manager:
 

@@ -1,3 +1,4 @@
+!.env.production
 # Logs
 logs
 *.log
@@ -25,3 +26,4 @@ dist-ssr
 
 .vercel
 .env*
+!.env.production
