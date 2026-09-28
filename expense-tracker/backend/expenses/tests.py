@@ -2,10 +2,11 @@ from datetime import date
 from typing import Any, cast
 
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import User
-from .models import Category, Expense, Income
+from .models import Budget, Category, Expense, Income
 
 
 class ExpenseApiTests(TestCase):
@@ -113,6 +114,34 @@ class ExpenseApiTests(TestCase):
         self.assertEqual(income_update.status_code, 200)
         self.assertEqual(income_update.json()["notes"], "Updated payroll note")
         self.assertEqual(self.client.delete(f"/api/income/{income_id}/").status_code, 204)
+
+    def test_monthly_budget_remaining_updates_when_current_month_expense_is_added(self):
+        today = timezone.localdate()
+        Budget.objects.create(user=self.owner, month=today.month, year=today.year, amount="1000.00")
+
+        Expense.objects.create(
+            user=self.owner,
+            category=self.category,
+            amount="125.50",
+            description="First expense",
+            date=today,
+        )
+        first_summary: Any = self.client.get("/api/dashboard/")
+        self.assertEqual(first_summary.status_code, 200)
+        self.assertEqual(first_summary.json()["monthly_budget"], 1000)
+        self.assertEqual(first_summary.json()["current_month_expense"], 125.5)
+        self.assertEqual(first_summary.json()["budget_remaining"], 874.5)
+
+        Expense.objects.create(
+            user=self.owner,
+            category=self.category,
+            amount="74.50",
+            description="Second expense",
+            date=today,
+        )
+        updated_summary: Any = self.client.get("/api/dashboard/")
+        self.assertEqual(updated_summary.json()["current_month_expense"], 200)
+        self.assertEqual(updated_summary.json()["budget_remaining"], 800)
 
     def test_invalid_expense_filters_return_validation_error(self):
         response: Any = self.client.get("/api/expenses/?date_from=not-a-date")
