@@ -22,9 +22,17 @@ render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
 if render_hostname:
     allowed_hosts = f"{allowed_hosts},{render_hostname}"
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts.split(",") if host.strip()]
-cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
 csrf_origins = os.getenv("CSRF_TRUSTED_ORIGINS", cors_origins)
-CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(
+    [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
+    + [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://pennywise-expense-tracker-ten.vercel.app",
+        "https://wise-expense-tracker-ten.vercel.app",
+    ]
+))
 CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_origins.split(",") if origin.strip()]
 
 INSTALLED_APPS = [
