@@ -1,5 +1,3 @@
-import re
-
 from django.core import mail
 from django.test import TestCase
 from django.test.utils import override_settings
@@ -12,7 +10,7 @@ from expenses.models import Notification
 
 class AuthFlowTests(TestCase):
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
-    def test_registration_creates_default_categories(self):
+    def test_registration_creates_active_user_without_otp(self):
         client = APIClient()
         payload = {
             "name": "Jane Doe",
@@ -52,40 +50,17 @@ class AuthFlowTests(TestCase):
                 "Other income",
             }.issubset(category_names)
         )
-        self.assertFalse(user.is_active)
-        self.assertEqual(client.post("/api/auth/login/", {"email": payload["email"], "password": payload["password"]}, format="json").status_code, 400)
-
-        code = re.search(r"\b(\d{6})\b", mail.outbox[0].body).group(1)
-        verify_response = client.post(
-            "/api/auth/verify-otp/",
-            {"email": payload["email"], "otp": code},
-            format="json",
-        )
-
-        self.assertEqual(verify_response.status_code, 200)
-        user.refresh_from_db()
         self.assertTrue(user.is_active)
+        self.assertEqual(mail.outbox, [])
         login_response = client.post(
             "/api/auth/login/",
             {"email": payload["email"], "password": payload["password"]},
             format="json",
         )
         self.assertEqual(login_response.status_code, 200)
-        self.assertNotIn("access", login_response.json())
-        rejected_registration_code = client.post(
-            "/api/auth/login/verify-otp/",
-            {"email": payload["email"], "otp": code},
-            format="json",
-        )
-        self.assertEqual(rejected_registration_code.status_code, 400)
-        login_code = re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
-        token_response = client.post(
-            "/api/auth/login/verify-otp/",
-            {"email": payload["email"], "otp": login_code},
-            format="json",
-        )
-        self.assertEqual(token_response.status_code, 200)
-        self.assertIn("access", token_response.json())
+        self.assertIn("access", login_response.json())
+        self.assertIn("refresh", login_response.json())
+        self.assertEqual(mail.outbox, [])
 
     def test_registration_rejects_invalid_inputs_and_duplicate_emails(self):
         User.objects.create_user(
@@ -121,7 +96,7 @@ class AuthFlowTests(TestCase):
         self.assertEqual(User.objects.count(), 1)
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
-    def test_login_requires_valid_email_code_before_issuing_tokens(self):
+    def test_login_returns_tokens_without_sending_otp(self):
         user = User.objects.create_user(
             email="two-step@example.com",
             name="Two Step User",
@@ -135,26 +110,9 @@ class AuthFlowTests(TestCase):
             format="json",
         )
         self.assertEqual(login.status_code, 200)
-        self.assertNotIn("access", login.json())
-        self.assertNotIn("refresh", login.json())
-
-        invalid_code = client.post(
-            "/api/auth/login/verify-otp/",
-            {"email": user.email, "otp": "000000"},
-            format="json",
-        )
-        self.assertEqual(invalid_code.status_code, 400)
-        self.assertNotIn("access", invalid_code.json())
-
-        code = re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
-        verified = client.post(
-            "/api/auth/login/verify-otp/",
-            {"email": user.email, "otp": code},
-            format="json",
-        )
-        self.assertEqual(verified.status_code, 200)
-        self.assertIn("access", verified.json())
-        self.assertIn("refresh", verified.json())
+        self.assertIn("access", login.json())
+        self.assertIn("refresh", login.json())
+        self.assertEqual(mail.outbox, [])
 
     def test_new_person_creates_notification_for_authenticated_user(self):
         user = User.objects.create_user(
@@ -185,26 +143,19 @@ class AuthFlowTests(TestCase):
             {"email": user.email, "password": "StrongPass123"},
             format="json",
         )
-        code = re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
-        token_response = client.post(
-            "/api/auth/login/verify-otp/",
-            {"email": user.email, "otp": code},
-            format="json",
-        )
-        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_response.json()['access']}")
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.json()['access']}")
 
         logout = client.post(
             "/api/auth/logout/",
-            {"refresh": token_response.json()["refresh"]},
+            {"refresh": login.json()["refresh"]},
             format="json",
         )
         refresh = client.post(
             "/api/auth/refresh/",
-            {"refresh": token_response.json()["refresh"]},
+                {"refresh": login.json()["refresh"]},
             format="json",
         )
 
         self.assertEqual(login.status_code, 200)
-        self.assertEqual(token_response.status_code, 200)
         self.assertEqual(logout.status_code, 200)
         self.assertEqual(refresh.status_code, 401)

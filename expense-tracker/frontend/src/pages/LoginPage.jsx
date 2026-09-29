@@ -24,9 +24,15 @@ export default function LoginPage() {
 
     try {
       const result = await login({ email: form.email.trim(), password: form.password });
-      setForm((current) => ({ ...current, email: result.email || current.email.trim(), password: '' }));
-      setOtpRequested(true);
-      setMessage(result.message || 'A login code has been sent to your email.');
+      if (!result.access) {
+        setError('Login did not return an access token. Please try again.');
+        return;
+      }
+      // Temporarily disabled; keep the OTP screen transition here for later.
+      // setForm((current) => ({ ...current, email: result.email || current.email.trim(), password: '' }));
+      // setOtpRequested(true);
+      // setMessage(result.message || 'A login code has been sent to your email.');
+      navigate('/dashboard');
     } catch (err) {
       const responseData = err.response?.data;
       const errorMessage = responseData?.non_field_errors?.[0]

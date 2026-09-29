@@ -37,6 +37,12 @@ export function AuthProvider({ children }) {
 
   const login = async (payload) => {
     const { data } = await api.post('/auth/login/', payload);
+    if (data.access && data.refresh && data.user) {
+      localStorage.setItem('access_token', data.access);
+      localStorage.setItem('refresh_token', data.refresh);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      setUser(data.user);
+    }
     return data;
   };
 

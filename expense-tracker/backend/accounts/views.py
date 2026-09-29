@@ -74,11 +74,15 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            try:
-                _send_email_otp(user)
-                message = "A verification code has been sent to your email."
-            except Exception:
-                message = "Account created, but the verification email could not be sent. Please try resending the code."
+            # Temporarily disabled; keep this block to restore email verification later.
+            # try:
+            #     _send_email_otp(user)
+            #     message = "A verification code has been sent to your email."
+            # except Exception:
+            #     message = "Account created, but the verification email could not be sent. Please try resending the code."
+            user.is_active = True
+            user.save(update_fields=["is_active"])
+            message = "Account created successfully. You can now log in."
             return Response({"message": message, "email": user.email}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -128,20 +132,22 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data["user"]
-            otp = EmailOTP.objects.filter(user=user, purpose="login").first()
-            can_send = not otp or otp.created_at <= timezone.now() - timedelta(seconds=60)
-            if can_send:
-                try:
-                    _send_email_otp(user, purpose="login")
-                except Exception:
-                    return Response(
-                        {"detail": "Unable to send the login code. Please try again."},
-                        status=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    )
-            return Response(
-                {"message": "A login code has been sent to your email.", "email": user.email},
-                status=status.HTTP_200_OK,
-            )
+            # Temporarily disabled; keep this block to restore login OTP later.
+            # otp = EmailOTP.objects.filter(user=user, purpose="login").first()
+            # can_send = not otp or otp.created_at <= timezone.now() - timedelta(seconds=60)
+            # if can_send:
+            #     try:
+            #         _send_email_otp(user, purpose="login")
+            #     except Exception:
+            #         return Response(
+            #             {"detail": "Unable to send the login code. Please try again."},
+            #             status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            #         )
+            # return Response(
+            #     {"message": "A login code has been sent to your email.", "email": user.email},
+            #     status=status.HTTP_200_OK,
+            # )
+            return _token_response(user)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

@@ -24,7 +24,7 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  const [verificationPending, setVerificationPending] = useState(() => Boolean(sessionStorage.getItem('pending_verification_email')));
+  const [verificationPending] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState(() => sessionStorage.getItem('pending_verification_email') || '');
   const [verificationCode, setVerificationCode] = useState('');
   const [verificationMessage, setVerificationMessage] = useState('');
@@ -65,11 +65,15 @@ export default function RegisterPage() {
         password: form.password,
         confirm_password: form.confirm_password,
       });
-      const email = result.email || form.email.trim();
-      setVerificationEmail(email);
-      sessionStorage.setItem('pending_verification_email', email);
-      setVerificationPending(true);
-      setSuccess(result.message || 'Enter the verification code sent to your email.');
+      setVerificationEmail(result.email || form.email.trim());
+      // Temporarily disabled; keep the email-verification flow here for later.
+      // const email = result.email || form.email.trim();
+      // setVerificationEmail(email);
+      // sessionStorage.setItem('pending_verification_email', email);
+      // setVerificationPending(true);
+      sessionStorage.removeItem('pending_verification_email');
+      setSuccess(result.message || 'Account created successfully. You can now log in.');
+      setTimeout(() => navigate('/login'), 1200);
     } catch (err) {
       const backendError = firstErrorMessage(err.response?.data);
       setError(backendError || (err.response ? 'Registration failed.' : 'Unable to connect to the server. Please try again.'));
