@@ -48,8 +48,11 @@ export default function ReportsPage() {
 
   const reportIsFinal = groupExpenses.length > 0 && groupExpenses.every((expense) =>
     (expense.settlements || []).every((settlement) => settlement.status === 'SETTLED'));
+  const canDownloadReport = !groupExpensesLoading && expenseRows.length > 0;
 
   const downloadExpenseReport = () => {
+    if (!canDownloadReport) return;
+
     const headers = ['Sr no', "Person's name", "Person's expenses", 'Expense description', 'Amount to pay', 'Who pays whom'];
     const rows = expenseRows.map((row, index) => [
       index + 1,
@@ -99,9 +102,17 @@ export default function ReportsPage() {
         <div className="flex flex-col justify-between gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-center">
           <div>
             <h2 id="final-expense-report-title" className="text-xl font-bold text-slate-900">{t('Final expense report')}</h2>
-            <p className="mt-1 text-sm text-slate-500">{reportIsFinal ? t('All group payments are settled.') : t('Download becomes available after all group payments are settled.')}</p>
+            <p className="mt-1 text-sm text-slate-500">
+              {groupExpensesLoading
+                ? t('Loading expense report...')
+                : reportIsFinal
+                  ? t('All group payments are settled.')
+                  : expenseRows.length
+                    ? t('Download the latest group expense report.')
+                    : t('No group expenses to report yet.')}
+            </p>
           </div>
-          <button type="button" onClick={downloadExpenseReport} disabled={!reportIsFinal || groupExpensesLoading}
+          <button type="button" onClick={downloadExpenseReport} disabled={!canDownloadReport}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#287253] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#205b43] disabled:cursor-not-allowed disabled:bg-slate-300">
             <Download className="h-4 w-4" />{t('Download CSV')}
           </button>
