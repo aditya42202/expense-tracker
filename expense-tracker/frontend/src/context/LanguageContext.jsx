@@ -108,7 +108,7 @@ const hindi = {
   'Biggest category': 'सबसे बड़ी खर्च श्रेणी', 'Budget left': 'बाकी बजट', 'No data': 'कोई डेटा नहीं',
   'Final expense report': 'अंतिम खर्च रिपोर्ट', 'All group payments are settled.': 'समूह के सभी भुगतान पूरे हो गए हैं।',
   'Download becomes available after all group payments are settled.': 'समूह के सभी भुगतान पूरे होने के बाद डाउनलोड उपलब्ध होगा।',
-  'Download CSV': 'CSV डाउनलोड करें', 'Sr no': 'क्रम संख्या', "Person's name": 'व्यक्ति का नाम',
+  'Download CSV': 'CSV डाउनलोड करें', 'Download Excel': 'Excel डाउनलोड करें', 'Download PDF': 'PDF डाउनलोड करें', 'Sr no': 'क्रम संख्या', "Person's name": 'व्यक्ति का नाम',
   "Person's expenses": 'व्यक्ति का खर्च', 'Expense description': 'खर्च का विवरण', 'Amount to pay': 'देय राशि',
   'No payment due': 'कोई भुगतान बाकी नहीं',
   'Loading expense report...': 'खर्च रिपोर्ट लोड हो रही है...', 'No group expenses to report yet.': 'रिपोर्ट के लिए अभी समूह खर्च नहीं हैं।',

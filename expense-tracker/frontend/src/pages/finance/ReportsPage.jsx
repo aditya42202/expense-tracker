@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download } from 'lucide-react';
+import { Download, FileDown } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 import api from '../../services/api';
 import { useLanguage } from '../../context/LanguageContext';
-
-function csvCell(value) {
-  const text = String(value ?? '');
-  const safeText = /^[=+@-]/.test(text) ? `'${text}` : text;
-  return `"${safeText.replaceAll('"', '""')}"`;
-}
 
 export default function ReportsPage() {
   const { language, t } = useLanguage();
@@ -50,26 +47,48 @@ export default function ReportsPage() {
     (expense.settlements || []).every((settlement) => settlement.status === 'SETTLED'));
   const canDownloadReport = !groupExpensesLoading && expenseRows.length > 0;
 
+  const reportHeaders = ['Sr no', "Person's name", "Person's expenses", 'Expense description', 'Amount to pay', 'Who pays whom'];
+
+  const getReportRows = () => expenseRows.map((row, index) => [
+    index + 1,
+    row.name,
+    localizedMoney.format(row.paid),
+    row.description,
+    localizedMoney.format(row.due),
+    row.transfers,
+  ]);
+
   const downloadExpenseReport = () => {
     if (!canDownloadReport) return;
 
-    const headers = ['Sr no', "Person's name", "Person's expenses", 'Expense description', 'Amount to pay', 'Who pays whom'];
-    const rows = expenseRows.map((row, index) => [
-      index + 1,
-      row.name,
-      localizedMoney.format(row.paid),
-      row.description,
-      localizedMoney.format(row.due),
-      row.transfers,
-    ]);
-    const csv = [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'final-expense-report.csv';
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    const worksheet = XLSX.utils.aoa_to_sheet([reportHeaders, ...getReportRows()]);
+    worksheet['!cols'] = [
+      { wch: 8 }, { wch: 24 }, { wch: 20 }, { wch: 32 }, { wch: 18 }, { wch: 55 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Expense report');
+    XLSX.writeFile(workbook, 'final-expense-report.xlsx');
+  };
+
+  const downloadExpenseReportPdf = () => {
+    if (!canDownloadReport) return;
+
+    const document = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    document.setFontSize(16);
+    document.text('Final Expense Report', 14, 16);
+    document.setFontSize(9);
+    document.setTextColor(100);
+    document.text(`Generated ${new Date().toLocaleDateString()}`, 14, 22);
+    autoTable(document, {
+      head: [reportHeaders],
+      body: getReportRows(),
+      startY: 28,
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+      headStyles: { fillColor: [40, 114, 83] },
+      columnStyles: { 0: { cellWidth: 12 }, 1: { cellWidth: 34 }, 2: { cellWidth: 32 }, 3: { cellWidth: 48 }, 4: { cellWidth: 30 }, 5: { cellWidth: 'auto' } },
+    });
+    document.save('final-expense-report.pdf');
   };
 
   const stats = useMemo(() => [
@@ -112,10 +131,16 @@ export default function ReportsPage() {
                     : t('No group expenses to report yet.')}
             </p>
           </div>
-          <button type="button" onClick={downloadExpenseReport} disabled={!canDownloadReport}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#287253] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#205b43] disabled:cursor-not-allowed disabled:bg-slate-300">
-            <Download className="h-4 w-4" />{t('Download CSV')}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={downloadExpenseReport} disabled={!canDownloadReport}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#287253] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#205b43] disabled:cursor-not-allowed disabled:bg-slate-300">
+              <Download className="h-4 w-4" />{t('Download Excel')}
+            </button>
+            <button type="button" onClick={downloadExpenseReportPdf} disabled={!canDownloadReport}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#287253] px-4 py-2.5 text-sm font-semibold text-[#287253] hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400">
+              <FileDown className="h-4 w-4" />{t('Download PDF')}
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left text-sm">
