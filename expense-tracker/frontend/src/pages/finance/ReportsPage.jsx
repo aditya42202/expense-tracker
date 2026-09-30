@@ -6,6 +6,35 @@ import * as XLSX from 'xlsx';
 import api from '../../services/api';
 import { useLanguage } from '../../context/LanguageContext';
 
+const DEVANAGARI_FONT_NAME = 'NotoSansDevanagari';
+
+const loadDevanagariFont = async (documentInstance) => {
+  if (!documentInstance || typeof window === 'undefined') return null;
+
+  try {
+    const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosansdevanagari/NotoSansDevanagari-Regular.ttf';
+    const response = await fetch(fontUrl);
+    if (!response.ok) throw new Error(`Font request failed with status ${response.status}`);
+
+    const arrayBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+
+    const base64 = btoa(binary);
+    const fontFileName = `${DEVANAGARI_FONT_NAME}-Regular.ttf`;
+    documentInstance.addFileToVFS(fontFileName, base64);
+    documentInstance.addFont(fontFileName, DEVANAGARI_FONT_NAME, 'normal');
+    documentInstance.setFont(DEVANAGARI_FONT_NAME);
+    return DEVANAGARI_FONT_NAME;
+  } catch (error) {
+    console.warn('Falling back to default PDF font because the Devanagari font could not be loaded:', error);
+    return null;
+  }
+};
+
 export default function ReportsPage() {
   const { language, t } = useLanguage();
   const localizedMoney = useMemo(() => new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }), [language]);
@@ -70,22 +99,36 @@ export default function ReportsPage() {
     XLSX.writeFile(workbook, 'final-expense-report.xlsx');
   };
 
-  const downloadExpenseReportPdf = () => {
+  const downloadExpenseReportPdf = async () => {
     if (!canDownloadReport) return;
 
     const document = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pdfFont = language === 'hi' ? await loadDevanagariFont(document) : null;
+
     document.setFontSize(16);
-    document.text('Final Expense Report', 14, 16);
+    document.text(t('Final expense report'), 14, 16);
     document.setFontSize(9);
     document.setTextColor(100);
-    document.text(`Generated ${new Date().toLocaleDateString()}`, 14, 22);
+
+    const generatedAt = new Intl.DateTimeFormat(language === 'hi' ? 'hi-IN' : 'en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(new Date());
+    document.text(`${t('Generated') || 'Generated'} ${generatedAt}`, 14, 22);
+
     autoTable(document, {
-      head: [reportHeaders],
+      head: [reportHeaders.map((header) => t(header))],
       body: getReportRows(),
       startY: 28,
       theme: 'grid',
-      styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
-      headStyles: { fillColor: [40, 114, 83] },
+      styles: {
+        font: pdfFont || 'helvetica',
+        fontSize: 8,
+        cellPadding: 2,
+        overflow: 'linebreak',
+      },
+      headStyles: { fillColor: [40, 114, 83], font: pdfFont || 'helvetica' },
       columnStyles: { 0: { cellWidth: 12 }, 1: { cellWidth: 34 }, 2: { cellWidth: 32 }, 3: { cellWidth: 48 }, 4: { cellWidth: 30 }, 5: { cellWidth: 'auto' } },
     });
     document.save('final-expense-report.pdf');
