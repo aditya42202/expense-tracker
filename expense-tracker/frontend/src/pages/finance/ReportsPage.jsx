@@ -111,7 +111,7 @@ export default function ReportsPage() {
   const downloadExpenseReportPdf = async () => {
     if (!canDownloadReport) return;
 
-    const document = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const document = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pdfFont = language === 'hi' ? await loadDevanagariFont(document) : null;
 
     document.setFontSize(16);
@@ -120,19 +120,33 @@ export default function ReportsPage() {
     document.setTextColor(100);
     document.text(`Generated ${new Date().toLocaleDateString()}`, 14, 22);
 
+    const pdfRows = getReportRows().map((row) => row.map((cell) => sanitizePdfText(cell)));
+
     autoTable(document, {
       head: [reportHeaders.map((header) => sanitizePdfText(header))],
-      body: getReportRows().map((row) => row.map((cell) => sanitizePdfText(cell))),
+      body: pdfRows,
       startY: 28,
       theme: 'grid',
+      margin: { left: 10, right: 10 },
       styles: {
         font: pdfFont || 'helvetica',
-        fontSize: 8,
+        fontSize: 7,
         cellPadding: 2,
         overflow: 'linebreak',
       },
       headStyles: { fillColor: [40, 114, 83], font: pdfFont || 'helvetica' },
-      columnStyles: { 0: { cellWidth: 12 }, 1: { cellWidth: 34 }, 2: { cellWidth: 32 }, 3: { cellWidth: 48 }, 4: { cellWidth: 30 }, 5: { cellWidth: 'auto' } },
+      columnStyles: {
+        0: { cellWidth: 14 },
+        1: { cellWidth: 28 },
+        2: { cellWidth: 24 },
+        3: { cellWidth: 46 },
+        4: { cellWidth: 22 },
+        5: { cellWidth: 52 },
+      },
+      didDrawPage: () => {
+        document.setFontSize(9);
+        document.setTextColor(100);
+      },
     });
     document.save('final-expense-report.pdf');
   };
