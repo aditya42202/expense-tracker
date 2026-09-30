@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Download } from 'lucide-react';
 import api from '../../services/api';
 import { useLanguage } from '../../context/LanguageContext';
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  const safeText = /^[=+@-]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replaceAll('"', '""')}"`;
+}
 
 export default function ReportsPage() {
   const { language, t } = useLanguage();
@@ -11,18 +18,56 @@ export default function ReportsPage() {
     monthly_trend: [],
     recent_transactions: [],
   });
+  const [groupExpenses, setGroupExpenses] = useState([]);
+  const [groupExpensesLoading, setGroupExpensesLoading] = useState(true);
 
   useEffect(() => {
-    const loadReports = async () => {
-      try {
-        const { data } = await api.get('/dashboard/reports/');
-        setReport(data);
-      } catch (error) {
-        console.error('Reports fetch failed:', error);
-      }
-    };
-    loadReports();
+    api.get('/dashboard/reports/')
+      .then(({ data }) => setReport(data))
+      .catch((error) => console.error('Reports fetch failed:', error));
+    api.get('/group-expenses/')
+      .then(({ data }) => setGroupExpenses(data))
+      .catch((error) => console.error('Group expense report fetch failed:', error))
+      .finally(() => setGroupExpensesLoading(false));
   }, []);
+
+  const expenseRows = useMemo(() => groupExpenses.flatMap((expense) => {
+    const participants = expense.participant_details || [];
+    return participants.map((participant) => {
+      const outgoing = (expense.settlements || []).filter((settlement) => settlement.from === participant.name);
+      return {
+        expenseId: expense.id,
+        name: participant.name,
+        paid: Number(participant.paid || 0),
+        description: expense.title,
+        due: outgoing.reduce((sum, settlement) => sum + Number(settlement.amount || 0), 0),
+        transfers: outgoing.map((settlement) => `${settlement.from} → ${settlement.to}: ${localizedMoney.format(Number(settlement.amount || 0))}`).join('; ') || t('No payment due'),
+      };
+    });
+  }), [groupExpenses, localizedMoney, t]);
+
+  const reportIsFinal = groupExpenses.length > 0 && groupExpenses.every((expense) =>
+    (expense.settlements || []).every((settlement) => settlement.status === 'SETTLED'));
+
+  const downloadExpenseReport = () => {
+    const headers = ['Sr no', "Person's name", "Person's expenses", 'Expense description', 'Amount to pay', 'Who pays whom'];
+    const rows = expenseRows.map((row, index) => [
+      index + 1,
+      row.name,
+      localizedMoney.format(row.paid),
+      row.description,
+      localizedMoney.format(row.due),
+      row.transfers,
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'final-expense-report.csv';
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
 
   const stats = useMemo(() => [
     { label: 'Monthly spend', value: localizedMoney.format(Number(report.summary.total_expense || 0)), tone: 'bg-indigo-50 text-indigo-700' },
@@ -49,6 +94,44 @@ export default function ReportsPage() {
           ))}
         </div>
       </div>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="final-expense-report-title">
+        <div className="flex flex-col justify-between gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-center">
+          <div>
+            <h2 id="final-expense-report-title" className="text-xl font-bold text-slate-900">{t('Final expense report')}</h2>
+            <p className="mt-1 text-sm text-slate-500">{reportIsFinal ? t('All group payments are settled.') : t('Download becomes available after all group payments are settled.')}</p>
+          </div>
+          <button type="button" onClick={downloadExpenseReport} disabled={!reportIsFinal || groupExpensesLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#287253] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#205b43] disabled:cursor-not-allowed disabled:bg-slate-300">
+            <Download className="h-4 w-4" />{t('Download CSV')}
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                {['Sr no', "Person's name", "Person's expenses", 'Expense description', 'Amount to pay', 'Who pays whom'].map((heading) => (
+                  <th key={heading} scope="col" className="px-4 py-3 font-semibold">{t(heading)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {expenseRows.length ? expenseRows.map((row, index) => (
+                <tr key={`${row.expenseId}-${row.name}`}>
+                  <td className="px-4 py-3 text-slate-500">{index + 1}</td>
+                  <td className="px-4 py-3 font-medium text-slate-900">{row.name}</td>
+                  <td className="px-4 py-3 text-slate-700">{localizedMoney.format(row.paid)}</td>
+                  <td className="px-4 py-3 text-slate-700">{row.description}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{localizedMoney.format(row.due)}</td>
+                  <td className="px-4 py-3 text-slate-700">{row.transfers}</td>
+                </tr>
+              )) : (
+                <tr><td colSpan="6" className="px-4 py-8 text-center text-slate-500">{groupExpensesLoading ? t('Loading expense report...') : t('No group expenses to report yet.')}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
