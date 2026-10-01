@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../services/api';
 import { useLanguage } from '../../context/LanguageContext';
+import ExpenseShareActions from '../../components/ExpenseShareActions';
 
 const paymentOptions = ['Cash', 'UPI', 'Debit Card', 'Credit Card', 'Net Banking', 'Wallet', 'Other'];
 
@@ -16,6 +17,7 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
   const [form, setForm] = useState({ amount: '', category: '', person: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [createdExpense, setCreatedExpense] = useState(null);
 
   const loadData = async () => {
     try {
@@ -49,15 +51,16 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
     e.preventDefault();
     setLoading(true);
     setMessage('');
+    setCreatedExpense(null);
     try {
-      await api.post('/expenses/', {
+      const { data } = await api.post('/expenses/', {
         ...form,
         amount: Number(form.amount),
         category: Number(form.category),
         person: form.person ? Number(form.person) : null,
       });
       onExpenseChange();
-      setMessage('Expense added successfully.');
+      setCreatedExpense(data);
       setForm({ amount: '', category: '', person: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
       await loadData();
     } catch (error) {
@@ -144,6 +147,7 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
           </div>
 
           {message && <p className="text-sm text-slate-600">{t(message)}</p>}
+          {createdExpense && <ExpenseShareActions expense={createdExpense} />}
 
           <button type="submit" disabled={loading} className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700 disabled:bg-indigo-400">
             {loading ? t('Saving...') : t('Add Expense')}

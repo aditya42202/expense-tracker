@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PencilLine, Plus, Search, Trash2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useLanguage } from '../../context/LanguageContext';
+import ExpenseShareActions from '../../components/ExpenseShareActions';
 
 const paymentOptions = ['Cash', 'UPI', 'Debit Card', 'Credit Card', 'Net Banking', 'Wallet', 'Other'];
 
 export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const { language, t } = useLanguage();
+  const [searchParams] = useSearchParams();
+  const entryId = searchParams.get('entry');
   const localizedMoney = new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
   const localizedPreciseMoney = new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [expenses, setExpenses] = useState([]);
@@ -16,6 +19,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const [newPersonName, setNewPersonName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [createdExpense, setCreatedExpense] = useState(null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
   const [dateFrom, setDateFrom] = useState('');
@@ -64,6 +68,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
         return list.sort((a, b) => new Date(b.date) - new Date(a.date));
     }
   }, [expenses, query, sort, dateFrom, dateTo, categoryFilter]);
+  const linkedExpense = expenses.find((item) => String(item.id) === entryId);
 
   const personTotals = useMemo(() => people.map((person) => {
     const personExpenses = expenses.filter((expense) => expense.person === person.id);
@@ -128,7 +133,8 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
       if (form.id) {
         await api.put(`/expenses/${form.id}/`, payload);
       } else {
-        await api.post('/expenses/', payload);
+        const { data } = await api.post('/expenses/', payload);
+        setCreatedExpense(data);
       }
 
       onExpenseChange();
@@ -350,9 +356,24 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
           <button type="submit" className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500">
             {t(form.id ? 'Update expense' : 'Save expense')}
           </button>
+          {createdExpense && <ExpenseShareActions expense={createdExpense} />}
         </form>
 
         <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          {linkedExpense && (
+            <section className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4" aria-labelledby="linked-expense-title">
+              <h2 id="linked-expense-title" className="text-base font-semibold text-emerald-950">{t('Shared expense')}</h2>
+              <dl className="mt-3 grid gap-x-5 gap-y-2 text-sm sm:grid-cols-2">
+                <div><dt className="text-slate-500">{t('Description')}</dt><dd className="font-medium text-slate-900">{linkedExpense.description || '-'}</dd></div>
+                <div><dt className="text-slate-500">{t('Amount')}</dt><dd className="font-medium text-slate-900">{localizedMoney.format(Number(linkedExpense.amount))}</dd></div>
+                <div><dt className="text-slate-500">{t('Category')}</dt><dd className="text-slate-800">{linkedExpense.category_name || '-'}</dd></div>
+                <div><dt className="text-slate-500">{t('Date')}</dt><dd className="text-slate-800">{linkedExpense.date}</dd></div>
+                <div><dt className="text-slate-500">{t('Paid by')}</dt><dd className="text-slate-800">{linkedExpense.person_name || '-'}</dd></div>
+                <div><dt className="text-slate-500">{t('Payment method')}</dt><dd className="text-slate-800">{t(linkedExpense.payment_method || '-')}</dd></div>
+                {linkedExpense.notes && <div className="sm:col-span-2"><dt className="text-slate-500">{t('Notes')}</dt><dd className="whitespace-pre-wrap text-slate-800">{linkedExpense.notes}</dd></div>}
+              </dl>
+            </section>
+          )}
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative w-full sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />

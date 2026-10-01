@@ -1,6 +1,6 @@
 import { ArrowLeft, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck, Sparkles, WalletCards } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 
@@ -15,6 +15,8 @@ export default function LoginPage() {
   const [message, setMessage] = useState('');
   const { login, verifyLoginOtp, resendLoginOtp } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const destination = location.state?.from || '/dashboard';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,7 +34,7 @@ export default function LoginPage() {
       // setForm((current) => ({ ...current, email: result.email || current.email.trim(), password: '' }));
       // setOtpRequested(true);
       // setMessage(result.message || 'A login code has been sent to your email.');
-      navigate('/dashboard');
+      navigate(destination, { replace: true });
     } catch (err) {
       const responseData = err.response?.data;
       const errorMessage = responseData?.non_field_errors?.[0]
@@ -51,7 +53,7 @@ export default function LoginPage() {
     setError('');
     try {
       await verifyLoginOtp({ email: form.email.trim(), otp: otpCode });
-      navigate('/dashboard');
+      navigate(destination, { replace: true });
     } catch (err) {
       setError(err.response?.data?.detail || 'Unable to verify the login code.');
     } finally {
