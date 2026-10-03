@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Budget, Category, CategoryBudget, Expense, GroupExpense, GroupMember, Income, Notification, Person, SavingsGoal, SettlementTransaction
+from .models import Budget, Category, CategoryBudget, Expense, GroupExpense, GroupExpenseParticipant, GroupMember, Income, Notification, Person, SavingsGoal, SettlementTransaction
 from .permissions import IsOwner
 from .serializers import (
     BudgetSerializer,
@@ -24,6 +24,7 @@ from .serializers import (
     GroupMemberSerializer,
     SettlementTransactionSerializer,
 )
+from .settlement import calculate_combined_settlement
 
 
 def _date_range(request):
@@ -327,6 +328,40 @@ class SettlementViewSet(viewsets.GenericViewSet):
 
     def list(self, request):
         return Response(self.get_serializer(self.get_queryset(), many=True).data)
+
+    @action(detail=False, methods=["get"])
+    def combined(self, request):
+        expenses = GroupExpense.objects.filter(owner=request.user)
+        participants = GroupExpenseParticipant.objects.filter(expense__in=expenses).select_related("member")
+        settled_transactions = SettlementTransaction.objects.filter(
+            expense__in=expenses,
+            status="SETTLED",
+        )
+        balances, transfers = calculate_combined_settlement(
+            [
+                {
+                    "member_id": row.member_id,
+                    "name": row.member.name,
+                    "paid_amount": row.paid_amount,
+                    "share_amount": row.share_amount,
+                }
+                for row in participants
+            ],
+            [
+                {
+                    "from_member_id": row.from_member_id,
+                    "to_member_id": row.to_member_id,
+                    "amount": row.amount,
+                }
+                for row in settled_transactions
+            ],
+        )
+        total = sum((expense.amount for expense in expenses), Decimal("0"))
+        return Response({
+            "total_group_expenses": total,
+            "balances": balances,
+            "transfers": transfers,
+        })
 
     @action(detail=False, methods=["get"])
     def summary(self, request):

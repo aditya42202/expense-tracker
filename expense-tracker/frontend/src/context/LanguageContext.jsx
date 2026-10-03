@@ -64,6 +64,8 @@ const hindi = {
   'Delete ': 'हटाएँ ',
   'Shared money, made clear': 'साझा खर्च का साफ़ हिसाब', 'Group expenses': 'समूह के खर्च',
   'Split fairly, then see exactly who pays whom.': 'बराबर बाँटें और देखें कि किसे किसे कितना देना है।',
+  'Combined settlement': 'सभी खर्चों का कुल हिसाब',
+  'All group expenses, less payments already marked paid.': 'समूह के सभी खर्च, जिनमें पहले से चुकाए भुगतान घटा दिए गए हैं।',
   'New shared expense': 'नया साझा खर्च', 'The payer is always treated as a participant.': 'भुगतानकर्ता भी समूह के सदस्यों में शामिल होगा।',
   'Expense title or description': 'खर्च का नाम या विवरण', Participants: 'सदस्य',
   'Select all (': 'सभी चुनें (', ' people included · each share is ': ' लोग शामिल · हर व्यक्ति का हिस्सा ',

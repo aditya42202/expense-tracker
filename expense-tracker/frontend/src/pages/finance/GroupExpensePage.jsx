@@ -13,6 +13,7 @@ export default function GroupExpensePage({ onExpenseChange = () => {} }) {
   const [members, setMembers] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [history, setHistory] = useState([]);
+  const [combinedSettlement, setCombinedSettlement] = useState({ total_group_expenses: 0, transfers: [] });
   const [form, setForm] = useState(blankForm());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -22,10 +23,11 @@ export default function GroupExpensePage({ onExpenseChange = () => {} }) {
 
   const load = async () => {
     try {
-      const [memberResponse, expenseResponse, historyResponse] = await Promise.all([api.get('/group-members/'), api.get('/group-expenses/'), api.get('/settlements/')]);
+      const [memberResponse, expenseResponse, historyResponse, combinedResponse] = await Promise.all([api.get('/group-members/'), api.get('/group-expenses/'), api.get('/settlements/'), api.get('/settlements/combined/')]);
       setMembers(memberResponse.data);
       setExpenses(expenseResponse.data);
       setHistory(historyResponse.data);
+      setCombinedSettlement(combinedResponse.data);
       setForm((current) => ({ ...current, participants: current.participants.length ? current.participants : memberResponse.data.map((item) => item.id), payers: current.payers[0].member ? current.payers : [{ member: memberResponse.data[0]?.id || '', amount: '' }] }));
     } catch {
       setError('Unable to load your group workspace.');
@@ -98,6 +100,14 @@ export default function GroupExpensePage({ onExpenseChange = () => {} }) {
         <div className="mt-2 flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><h1 className="text-3xl font-semibold">{t('Group expenses')}</h1><p className="mt-2 max-w-xl text-sm text-emerald-100/70">{t('Split fairly, then see exactly who pays whom.')}</p></div><Users className="h-10 w-10 text-emerald-200/70" /></div>
       </div>
       {(error || message) && <div className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{t(error || message)}</div>}
+
+      {!loading && expenses.length > 0 && <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="text-lg font-semibold text-slate-950">{t('Combined settlement')}</h2><p className="mt-1 text-sm text-slate-600">{t('All group expenses, less payments already marked paid.')}</p></div>
+          <div className="rounded-xl bg-white px-3 py-2 text-right"><p className="text-xs text-slate-500">{t('Total group expenses')}</p><p className="font-semibold text-slate-900">{money.format(combinedSettlement.total_group_expenses)}</p></div>
+        </div>
+        {combinedSettlement.transfers.length ? <div className="mt-4 grid gap-2 sm:grid-cols-2">{combinedSettlement.transfers.map((transfer) => <div key={`${transfer.from_member}-${transfer.to_member}`} className="flex flex-col gap-2 rounded-xl border border-emerald-100 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2 text-sm"><span className="font-semibold text-slate-950">{transfer.from_name}</span><ArrowRight className="h-4 w-4 text-slate-400" /><span className="font-semibold text-slate-950">{transfer.to_name}</span></div><p className="text-lg font-bold text-[#287253]">{money.format(transfer.amount)}</p></div>)}</div> : <p className="mt-4 rounded-xl bg-white px-3 py-2 text-sm font-medium text-emerald-700">{t('Everyone is settled. No payment is due.')}</p>}
+      </section>}
 
       <div className="grid gap-6 xl:grid-cols-[0.82fr_1.18fr]">
         <form onSubmit={submit} className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">

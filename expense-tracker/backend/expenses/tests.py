@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from typing import Any, cast
 
 from django.test import TestCase
@@ -6,7 +7,16 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import User
-from .models import Budget, Category, Expense, Income
+from .models import (
+    Budget,
+    Category,
+    Expense,
+    GroupExpense,
+    GroupExpenseParticipant,
+    GroupMember,
+    Income,
+    SettlementTransaction,
+)
 
 
 class ExpenseApiTests(TestCase):
@@ -175,3 +185,47 @@ class ExpenseApiTests(TestCase):
         self.assertIn("amount", expense_response.json())
         self.assertEqual(income_response.status_code, 400)
         self.assertIn("category", income_response.json())
+
+    def test_combined_settlement_offsets_expenses_and_already_paid_transfers(self):
+        members = {
+            name: cast(Any, GroupMember.objects).create(owner=self.owner, name=name)
+            for name in ("Alice", "Bob", "Carol")
+        }
+        first_expense = cast(Any, GroupExpense.objects).create(
+            owner=self.owner,
+            title="First trip",
+            amount="100.00",
+            date=date(2026, 9, 10),
+        )
+        second_expense = cast(Any, GroupExpense.objects).create(
+            owner=self.owner,
+            title="Second trip",
+            amount="100.00",
+            date=date(2026, 9, 11),
+        )
+        cast(Any, GroupExpenseParticipant.objects).bulk_create([
+            GroupExpenseParticipant(expense=first_expense, member=members["Alice"], paid_amount="100.00", share_amount="50.00"),
+            GroupExpenseParticipant(expense=first_expense, member=members["Bob"], paid_amount="0.00", share_amount="50.00"),
+            GroupExpenseParticipant(expense=second_expense, member=members["Bob"], paid_amount="100.00", share_amount="50.00"),
+            GroupExpenseParticipant(expense=second_expense, member=members["Carol"], paid_amount="0.00", share_amount="50.00"),
+        ])
+        cast(Any, SettlementTransaction.objects).create(
+            expense=first_expense,
+            from_member=members["Bob"],
+            to_member=members["Alice"],
+            amount="20.00",
+            status="SETTLED",
+            settled_at=timezone.now(),
+        )
+
+        response: Any = self.client.get("/api/settlements/combined/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Decimal(str(response.json()["total_group_expenses"])), Decimal("200.00"))
+        self.assertEqual(
+            [
+                (transfer["from_name"], transfer["to_name"], Decimal(str(transfer["amount"])))
+                for transfer in response.json()["transfers"]
+            ],
+            [("Carol", "Alice", Decimal("30.00")), ("Carol", "Bob", Decimal("20.00"))],
+        )
