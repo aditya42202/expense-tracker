@@ -1,3 +1,4 @@
+import calendar
 from decimal import Decimal
 
 from django.utils import timezone
@@ -250,17 +251,74 @@ class CategoryBudgetSerializer(serializers.ModelSerializer):
 
 class SavingsGoalSerializer(serializers.ModelSerializer):
     progress = serializers.SerializerMethodField()
+    remaining_amount = serializers.SerializerMethodField()
+    required_monthly_savings = serializers.SerializerMethodField()
+    required_weekly_savings = serializers.SerializerMethodField()
+    is_completed = serializers.SerializerMethodField()
 
     class Meta:
         model = SavingsGoal
-        fields = ["id", "name", "target_amount", "current_amount", "target_date", "description", "progress", "created_at", "updated_at"]
+        fields = [
+            "id", "name", "target_amount", "current_amount", "target_date", "description",
+            "progress", "remaining_amount", "required_monthly_savings", "required_weekly_savings",
+            "is_completed", "created_at", "updated_at",
+        ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def get_progress(self, obj):
         if obj.target_amount == 0:
             return 0
         progress = obj.current_amount * Decimal("100") / obj.target_amount
-        return float(round(progress, 2))
+        return float(min(Decimal("100"), round(progress, 2)))
+
+    def get_remaining_amount(self, obj):
+        return float(max(Decimal("0"), obj.target_amount - obj.current_amount))
+
+    def _required_savings(self, obj, days_per_period):
+        remaining = max(Decimal("0"), obj.target_amount - obj.current_amount)
+        if remaining == 0:
+            return 0
+        if not obj.target_date:
+            return None
+        days_remaining = (obj.target_date - timezone.localdate()).days
+        if days_remaining <= 0:
+            return None
+        amount = remaining * days_per_period / Decimal(days_remaining)
+        return float(amount.quantize(Decimal("0.01")))
+
+    def get_required_monthly_savings(self, obj):
+        remaining = max(Decimal("0"), obj.target_amount - obj.current_amount)
+        if remaining == 0:
+            return 0
+        if not obj.target_date:
+            return None
+        today = timezone.localdate()
+        days_remaining = (obj.target_date - today).days
+        if days_remaining <= 0:
+            return None
+        months_remaining = Decimal((obj.target_date.year - today.year) * 12 + obj.target_date.month - today.month)
+        month_length = Decimal(calendar.monthrange(obj.target_date.year, obj.target_date.month)[1])
+        months_remaining += Decimal(obj.target_date.day - today.day) / month_length
+        if months_remaining <= 0:
+            return None
+        amount = remaining / months_remaining
+        return float(amount.quantize(Decimal("0.01")))
+
+    def get_required_weekly_savings(self, obj):
+        return self._required_savings(obj, Decimal("7"))
+
+    def get_is_completed(self, obj):
+        return obj.current_amount >= obj.target_amount
+
+    def validate_target_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Target amount must be greater than zero.")
+        return value
+
+    def validate_current_amount(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Current savings cannot be negative.")
+        return value
 
 
 class SavingsGoalAmountSerializer(serializers.Serializer):

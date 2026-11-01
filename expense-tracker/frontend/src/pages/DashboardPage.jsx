@@ -56,6 +56,8 @@ export default function DashboardPage() {
   const budgetUsed = budget > 0 ? (spent / budget) * 100 : 0;
   const progressWidth = Math.min(100, budgetUsed);
   const transactions = data.recent_transactions || [];
+  const financialHealth = data.financial_health;
+  const forecast = data.expense_forecast;
   const chartData = [
     { name: t('Income'), amount: Number(data.total_income) || 0, fill: '#67b99a' },
     { name: t('Expenses'), amount: Number(data.total_expense) || 0, fill: '#ef967b' },
@@ -75,7 +77,7 @@ export default function DashboardPage() {
   }).format(new Date());
 
   return (
-    <div className="mx-auto max-w-[1440px] space-y-6 pb-4">
+    <div className="mx-auto max-w-360 space-y-6 pb-4">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="text-sm font-medium text-slate-500">{t('Your financial overview')}</p>
@@ -178,6 +180,66 @@ export default function DashboardPage() {
           </div>
         ))}
       </div>
+
+      <section className="grid gap-5 xl:grid-cols-2">
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-slate-500">{t('Financial wellness')}</p>
+              <h2 className="mt-1 text-xl font-semibold text-slate-950">{t('Financial Health Score')}</h2>
+            </div>
+            {financialHealth?.score != null && (
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border-[5px] border-[#dcefe5] text-xl font-bold text-[#287253]" role="img" aria-label={`${financialHealth.score} out of 100`}>
+                {financialHealth.score}
+              </div>
+            )}
+          </div>
+          {financialHealth?.score == null
+            ? <p className="mt-5 text-sm text-slate-600">{t('Not enough recorded information to calculate a score yet. Add income and a monthly budget. Missing debt and emergency-fund information is not assumed.')}</p>
+            : <p className="mt-3 text-sm font-semibold text-[#287253]">{t(financialHealth.category)} · {t('Savings rate')}: {financialHealth.savings_rate}%</p>}
+          {financialHealth?.score != null && <p className="mt-1 text-xs text-slate-500">{t('Based on')} {financialHealth.scored_weight}/100 {t('weighted points with available data')}</p>}
+          {financialHealth?.factors?.length > 0 && (
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {financialHealth.factors.map((factor) => (
+                <div key={factor.key} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                  <span className="text-slate-600">{t(factor.label)}</span>
+                  <span className="font-medium text-slate-900">{factor.status === 'scored' ? `${factor.earned_points}/${factor.maximum_points}` : t('Not scored')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="mt-4 text-xs leading-relaxed text-slate-500">{t(financialHealth?.disclaimer || 'This educational indicator is not a credit score.')}</p>
+        </article>
+
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-slate-500">{t('Expense forecast')}</p>
+              <h2 className="mt-1 text-xl font-semibold text-slate-950">{formatMoney(forecast?.projected_month_end)}</h2>
+              <p className="mt-1 text-xs text-slate-500">{t('Estimated month-end spending')} · {t(forecast?.confidence || 'low')} {t('confidence')}</p>
+            </div>
+            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">{t('Estimate')}</span>
+          </div>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">{t('Spent so far')}</p>
+              <p className="mt-1 font-semibold text-slate-900">{formatMoney(forecast?.month_to_date)}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">{t('Forecast budget remaining')}</p>
+              <p className={`mt-1 font-semibold ${Number(forecast?.projected_budget_remaining) < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
+                {forecast?.projected_budget_remaining == null ? t('No budget set') : formatMoney(forecast.projected_budget_remaining)}
+              </p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs leading-relaxed text-slate-500">
+            {forecast?.highest_spending_category
+              ? `${t('Highest spending category this month')}: ${forecast.highest_spending_category}`
+              : t('Add expenses to see your leading spending category.')}
+            {' '}{t('Forecasts are estimates based on recorded spending, not guaranteed outcomes.')}
+          </p>
+        </article>
+      </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <div>

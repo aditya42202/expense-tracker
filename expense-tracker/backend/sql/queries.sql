@@ -1,4 +1,4 @@
--- Pennywise database inspection queries for SQLite.
+-- MoneyMind database inspection queries for SQLite.
 -- Replace named parameters such as :user_id with values in your SQL client.
 
 -- Show all users (never select password hashes for routine inspection).

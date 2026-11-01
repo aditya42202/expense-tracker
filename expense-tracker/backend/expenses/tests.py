@@ -1,4 +1,6 @@
+import calendar
 from datetime import date
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -15,6 +17,8 @@ from .models import (
     GroupExpenseParticipant,
     GroupMember,
     Income,
+    SavingsContribution,
+    SavingsGoal,
     SettlementTransaction,
 )
 
@@ -155,6 +159,78 @@ class ExpenseApiTests(TestCase):
         updated_summary: Any = self.client.get("/api/dashboard/")
         self.assertEqual(updated_summary.json()["current_month_expense"], 200)
         self.assertEqual(updated_summary.json()["budget_remaining"], 800)
+
+    def test_dashboard_returns_data_derived_health_and_expense_forecast(self):
+        today = timezone.localdate()
+        Budget.objects.create(user=self.owner, month=today.month, year=today.year, amount="1000.00")
+        Income.objects.create(
+            user=self.owner,
+            category=self.income_category,
+            amount="2000.00",
+            description="Salary",
+            date=today,
+        )
+        Expense.objects.create(
+            user=self.owner,
+            category=self.category,
+            amount="400.00",
+            description="Groceries",
+            date=today,
+        )
+        previous_month_day = today.replace(day=1) - timedelta(days=1)
+        Expense.objects.create(
+            user=self.owner,
+            category=self.category,
+            amount="20000.00",
+            description="Previous month groceries",
+            date=previous_month_day,
+        )
+
+        response: Any = self.client.get("/api/dashboard/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["savings_rate"], 80.0)
+        self.assertIsNotNone(data["financial_health"]["score"])
+        self.assertEqual(data["financial_health"]["category"], "Excellent")
+        self.assertIsNone(next(factor for factor in data["financial_health"]["factors"] if factor["key"] == "debt_management")["earned_points"])
+        self.assertEqual(data["expense_forecast"]["month_to_date"], 400)
+        self.assertTrue(data["expense_forecast"]["is_estimate"])
+        self.assertEqual(data["expense_forecast"]["highest_spending_category"], "Food")
+
+    def test_savings_goal_contributions_are_user_scoped_and_do_not_create_transactions(self):
+        today = timezone.localdate()
+        target_month_index = today.month - 1 + 6
+        target_year = today.year + target_month_index // 12
+        target_month = target_month_index % 12 + 1
+        target_day = min(today.day, calendar.monthrange(target_year, target_month)[1])
+        target_date = date(target_year, target_month, target_day)
+        response: Any = self.client.post(
+            "/api/goals/",
+            {
+                "name": "Laptop",
+                "target_amount": "60000.00",
+                "current_amount": "15000.00",
+                "target_date": target_date.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        goal_id = response.json()["id"]
+        self.assertEqual(response.json()["remaining_amount"], 45000)
+        self.assertEqual(response.json()["required_monthly_savings"], 7500)
+
+        contribution: Any = self.client.post(f"/api/goals/{goal_id}/add-money/", {"amount": "45000.00"}, format="json")
+        self.assertEqual(contribution.status_code, 200)
+        self.assertEqual(contribution.json()["current_amount"], "60000.00")
+        self.assertTrue(contribution.json()["is_completed"])
+        self.assertEqual(SavingsContribution.objects.filter(goal_id=goal_id).count(), 1)
+        self.assertEqual(Expense.objects.filter(user=self.owner).count(), 0)
+        self.assertEqual(Income.objects.filter(user=self.owner).count(), 0)
+
+        other_client: Any = APIClient()
+        other_client.force_authenticate(user=self.other_user)
+        self.assertEqual(other_client.get(f"/api/goals/{goal_id}/").status_code, 404)
 
     def test_invalid_expense_filters_return_validation_error(self):
         response: Any = self.client.get("/api/expenses/?date_from=not-a-date")

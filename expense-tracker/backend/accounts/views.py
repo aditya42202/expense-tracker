@@ -29,7 +29,7 @@ def _send_email_otp(user, purpose="registration"):
     )
     try:
         send_mail(
-            subject="Your Pennywise login code" if purpose == "login" else "Your Pennywise verification code",
+            subject="Your MoneyMind login code" if purpose == "login" else "Your MoneyMind verification code",
             message=f"Your {'login' if purpose == 'login' else 'verification'} code is {code}. It expires in 10 minutes.",
             from_email=None,
             recipient_list=[user.email],

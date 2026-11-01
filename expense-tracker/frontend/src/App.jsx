@@ -41,7 +41,7 @@ function HomeRoute() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-700" role="status">
-        <p className="text-sm font-medium">Loading Pennywise...</p>
+        <p className="text-sm font-medium">Loading MoneyMind...</p>
       </div>
     );
   }

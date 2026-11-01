@@ -66,7 +66,8 @@ export default function Layout({ children }) {
               </span>
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-indigo-300">Finance OS</div>
-                <h1 className="mt-0.5 text-lg font-bold text-white">Pennywise</h1>
+                <h1 className="mt-0.5 text-lg font-bold text-white">MoneyMind</h1>
+                <p className="mt-0.5 text-[10px] text-slate-400">Manage Money. Master Your Future.</p>
               </div>
             </div>
           </div>
@@ -195,7 +196,7 @@ export default function Layout({ children }) {
 
           <footer className="border-t border-slate-200 bg-white px-4 py-4 md:px-8">
             <div className="flex flex-col items-center justify-between gap-2 text-sm text-slate-500 sm:flex-row">
-              <p>© 2026 Pennywise. {t('All rights reserved.')}</p>
+              <p>© 2026 MoneyMind. {t('All rights reserved.')}</p>
               <div className="flex items-center gap-4">
                 <span>{t('Privacy')}</span>
                 <span>{t('Terms')}</span>

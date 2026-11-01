@@ -1,6 +1,10 @@
-# Pennywise Expense Tracker
+# MoneyMind
 
-Pennywise is a responsive React/Vite client backed by a Django REST API. SQLite is used for local development; PostgreSQL is configured through `DATABASE_URL` for production. Web and future mobile clients communicate only with the HTTPS API, never directly with the database.
+**Manage Money. Master Your Future.**
+
+MoneyMind is a responsive personal finance app with a React/Vite client backed by a Django REST API. It supports expenses, income, budgets, savings goals, notifications, reports, and group expense settlements. SQLite is used for local development; PostgreSQL is configured through `DATABASE_URL` for production. Clients communicate only with the HTTPS API, never directly with the database.
+
+The dashboard derives a month-end spending estimate from current-month spending pace and reports a financial wellness score only when income and budget data are available. The score is educational, not a credit score; emergency-fund and debt factors remain unscored because the app does not collect those details. Forecasts are estimates, not guaranteed outcomes. Savings-goal contributions are recorded separately and do not create or alter income and expense transactions.
 
 ## Project layout
 
@@ -49,6 +53,7 @@ All private endpoints require `Authorization: Bearer <access-token>`. Sign-in re
 - Current user/profile: `GET /api/auth/profile/`, `PUT /api/auth/profile/`, `GET /api/profile/`
 - Expenses: `GET/POST /api/expenses/`, `GET/PUT/PATCH/DELETE /api/expenses/{id}/`
 - Income: `GET/POST /api/income/`, `GET/PUT/PATCH/DELETE /api/income/{id}/`
+- Savings goals: `GET/POST /api/goals/`, standard detail update/delete routes, and `POST /api/goals/{id}/add-money/`
 - Categories: `GET/POST /api/categories/`, standard detail update/delete routes
 - Dashboard: `GET /api/dashboard/`, `GET /api/dashboard/reports/`, `/api/dashboard/monthly/?months=12`, `/api/dashboard/categories/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - Health: public `GET /api/health/` returns `{"status":"ok"}`
@@ -59,7 +64,7 @@ Expense and income lists support `search`, `category`, `date_from`, and `date_to
 
 The repository includes a Render Blueprint at the Git root ([`render.yaml`](../render.yaml)) and Vercel SPA routing in `frontend/vercel.json`. Deploy from the connected GitHub repository:
 
-1. In Render, create a new Blueprint from this repository and approve the `pennywise-api` Starter web service plus Basic PostgreSQL database. These are paid Render plans. The Blueprint installs `backend/requirements.txt`, applies migrations and collects static assets before deploy, and uses `/api/health/` as its health check.
+1. In Render, create a new Blueprint from this repository and approve the existing API Starter web service plus Basic PostgreSQL database. These are paid Render plans. The Blueprint installs `backend/requirements.txt`, applies migrations and collects static assets before deploy, and uses `/api/health/` as its health check.
 2. The Render Blueprint allows both the previous Vercel origin and `https://wise-expense-tracker-ten.vercel.app` through `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS`. Django includes Render's automatically supplied `RENDER_EXTERNAL_HOSTNAME` in `ALLOWED_HOSTS`. Add SMTP `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL` in Render's environment for verification-code delivery.
 3. Import the same repository into Vercel and set the Root Directory to `expense-tracker/frontend`. Set the Vercel build environment variable `VITE_API_BASE_URL` to `https://expense-tracker-l07o.onrender.com/api` for Production (and Preview only if those deployments should use this API). `frontend/.env.production` provides the same build default; Vercel uses `npm ci`, `npm run build`, `dist`, and rewrites client routes to `index.html`.
 4. Verify `https://expense-tracker-l07o.onrender.com/api/health/` returns `{"status":"ok"}`, then test sign-in and confirm the login OTP arrives by email.

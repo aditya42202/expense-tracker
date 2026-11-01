@@ -100,7 +100,8 @@ export default function LoginPage() {
               </span>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-indigo-200">Finance OS</p>
-                <h1 className="mt-1 text-2xl font-bold">Pennywise</h1>
+                <h1 className="mt-1 text-2xl font-bold">MoneyMind</h1>
+                <p className="mt-1 text-xs text-slate-300">Manage Money. Master Your Future.</p>
               </div>
             </div>
           </div>

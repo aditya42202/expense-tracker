@@ -114,7 +114,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#eef2ff,_#f8fafc_40%,_#eef6ff_100%)] p-4 md:p-8">
+    <div className="relative flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,#eef2ff,#f8fafc_40%,#eef6ff_100%)] p-4 md:p-8">
       <label className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm">
         {t('Select language')}
         <select value={language} onChange={(event) => setLanguage(event.target.value)} aria-label={t('Select language')} className="bg-transparent font-medium text-slate-900">
@@ -123,15 +123,16 @@ export default function RegisterPage() {
       </label>
       <div className="grid w-full max-w-6xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_35px_80px_-30px_rgba(15,23,42,0.28)] lg:grid-cols-[1.05fr_0.95fr]">
         <div className="relative hidden overflow-hidden bg-slate-950 p-8 text-white lg:flex lg:flex-col lg:justify-between">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.35),_transparent_42%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.35),transparent_42%)]" />
           <div className="relative z-10">
             <div className="flex items-center gap-3">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white shadow-xl shadow-indigo-950/40">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-indigo-500 to-violet-500 text-white shadow-xl shadow-indigo-950/40">
                 <WalletCards className="h-5 w-5" />
               </span>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-indigo-200">{t('Get started')}</p>
-                <h1 className="mt-1 text-2xl font-bold">Pennywise</h1>
+                <h1 className="mt-1 text-2xl font-bold">MoneyMind</h1>
+                <p className="mt-1 text-xs text-slate-300">Manage Money. Master Your Future.</p>
               </div>
             </div>
           </div>

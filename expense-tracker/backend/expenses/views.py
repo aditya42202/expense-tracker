@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import cast
 
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils.dateparse import parse_date
 from django.utils import timezone
@@ -9,7 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Budget, Category, CategoryBudget, Expense, GroupExpense, GroupExpenseParticipant, GroupMember, Income, Notification, Person, SavingsGoal, SettlementTransaction
+from .models import Budget, Category, CategoryBudget, Expense, GroupExpense, GroupExpenseParticipant, GroupMember, Income, Notification, Person, SavingsContribution, SavingsGoal, SettlementTransaction
 from .permissions import IsOwner
 from .serializers import (
     BudgetSerializer,
@@ -104,6 +105,128 @@ def _month_series(user, months=6):
         month_label = timezone.datetime(year, month, 1).strftime("%b")
         month_data.insert(0, {"month": month_label, "income": float(income_total), "expense": float(expense_total)})
     return month_data
+
+
+def _financial_health(user, today, monthly_income, monthly_expense, monthly_budget):
+    factors = []
+    earned_points = Decimal("0")
+    available_points = Decimal("0")
+
+    if monthly_income > 0:
+        savings_rate = max(Decimal("0"), (monthly_income - monthly_expense) / monthly_income * 100)
+        savings_points = min(Decimal("30"), savings_rate * Decimal("1.5"))
+        factors.append({
+            "key": "savings_rate",
+            "label": "Savings rate",
+            "earned_points": round(float(savings_points), 1),
+            "maximum_points": 30,
+            "status": "scored",
+        })
+        earned_points += savings_points
+        available_points += Decimal("30")
+    else:
+        savings_rate = None
+        factors.append({"key": "savings_rate", "label": "Savings rate", "earned_points": None, "maximum_points": 30, "status": "unavailable"})
+
+    if monthly_budget > 0:
+        utilization = monthly_expense / monthly_budget
+        budget_points = max(Decimal("0"), min(Decimal("25"), (Decimal("1") - max(Decimal("0"), utilization - Decimal("0.8")) / Decimal("0.4")) * Decimal("25")))
+        factors.append({
+            "key": "budget_management",
+            "label": "Budget management",
+            "earned_points": round(float(budget_points), 1),
+            "maximum_points": 25,
+            "status": "scored",
+        })
+        earned_points += budget_points
+        available_points += Decimal("25")
+    else:
+        factors.append({"key": "budget_management", "label": "Budget management", "earned_points": None, "maximum_points": 25, "status": "unavailable"})
+
+    previous_months = []
+    for offset in range(1, 4):
+        month = today.month - offset
+        year = today.year
+        while month <= 0:
+            month += 12
+            year -= 1
+        amount = Expense.objects.filter(user=user, date__month=month, date__year=year).aggregate(total=Sum("amount"))["total"]
+        if amount is not None:
+            previous_months.append(amount)
+
+    if previous_months:
+        average_expense = sum(previous_months, Decimal("0")) / len(previous_months)
+        days_in_month = (timezone.datetime(today.year + (today.month == 12), today.month % 12 + 1, 1) - timezone.timedelta(days=1)).day
+        projected_expense = monthly_expense / today.day * days_in_month
+        if average_expense > 0:
+            increase = max(Decimal("0"), projected_expense / average_expense - Decimal("1"))
+            control_points = Decimal("20") * max(Decimal("0"), Decimal("1") - increase / Decimal("0.5"))
+            factors.append({
+                "key": "expense_control",
+                "label": "Expense control",
+                "earned_points": round(float(control_points), 1),
+                "maximum_points": 20,
+                "status": "scored",
+            })
+            earned_points += control_points
+            available_points += Decimal("20")
+        else:
+            factors.append({"key": "expense_control", "label": "Expense control", "earned_points": None, "maximum_points": 20, "status": "unavailable"})
+    else:
+        factors.append({"key": "expense_control", "label": "Expense control", "earned_points": None, "maximum_points": 20, "status": "unavailable"})
+
+    factors.extend([
+        {"key": "emergency_fund", "label": "Emergency fund", "earned_points": None, "maximum_points": 15, "status": "unavailable"},
+        {"key": "debt_management", "label": "Debt management", "earned_points": None, "maximum_points": 10, "status": "unavailable"},
+    ])
+    score = round(float(earned_points / available_points * 100)) if available_points >= 55 else None
+    category = None
+    if score is not None:
+        category = "Excellent" if score >= 80 else "Good" if score >= 60 else "Fair" if score >= 40 else "Needs Improvement"
+
+    return {
+        "score": score,
+        "category": category,
+        "savings_rate": round(float(savings_rate), 1) if savings_rate is not None else None,
+        "scored_weight": float(available_points),
+        "factors": factors,
+        "disclaimer": "An educational financial wellness indicator, not a credit score. Emergency fund and debt information are not collected and are excluded.",
+    }
+
+
+def _expense_forecast(user, today, monthly_expense, monthly_budget):
+    next_month = today.month % 12 + 1
+    next_year = today.year + (today.month == 12)
+    days_in_month = (timezone.datetime(next_year, next_month, 1) - timezone.timedelta(days=1)).day
+    projected = monthly_expense / today.day * days_in_month
+    history_month = today.month - 3
+    history_year = today.year
+    while history_month <= 0:
+        history_month += 12
+        history_year -= 1
+    history_start = timezone.datetime(history_year, history_month, 1).date()
+    prior_month_count = Expense.objects.filter(
+        user=user,
+        date__gte=history_start,
+        date__lt=today.replace(day=1),
+    ).dates("date", "month").count()
+    confidence = "high" if prior_month_count >= 3 else "medium" if prior_month_count >= 1 else "low"
+    category = (
+        Expense.objects.filter(user=user, date__month=today.month, date__year=today.year)
+        .values("category__name")
+        .annotate(total=Sum("amount"))
+        .order_by("-total")
+        .first()
+    )
+    return {
+        "month_to_date": float(monthly_expense),
+        "projected_month_end": round(float(projected), 2),
+        "budget": float(monthly_budget),
+        "projected_budget_remaining": round(float(monthly_budget - projected), 2) if monthly_budget else None,
+        "confidence": confidence,
+        "highest_spending_category": category["category__name"] if category else None,
+        "is_estimate": True,
+    }
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
@@ -250,6 +373,12 @@ class SavingsGoalViewSet(viewsets.ModelViewSet):
         goal = serializer.save(user=self.request.user)
         _notify_user(self.request.user, "Savings goal added", f"{goal.name} was added as a savings goal.")
 
+    def perform_update(self, serializer):
+        was_completed = serializer.instance.current_amount >= serializer.instance.target_amount
+        goal = serializer.save()
+        if not was_completed and goal.current_amount >= goal.target_amount:
+            _notify_user(self.request.user, "Savings goal completed", f"You reached your {goal.name} savings goal.")
+
     def get_object(self):
         obj = super().get_object()
         self.check_object_permissions(self.request, obj)
@@ -262,9 +391,15 @@ class SavingsGoalViewSet(viewsets.ModelViewSet):
         if not amount_serializer.is_valid():
             return Response(amount_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         amount = cast(dict[str, Decimal], amount_serializer.validated_data)["amount"]
-        goal.current_amount += amount
-        goal.save()
+        with transaction.atomic():
+            goal = SavingsGoal.objects.select_for_update().get(pk=goal.pk, user=request.user)
+            previous_amount = goal.current_amount
+            goal.current_amount += amount
+            goal.save(update_fields=["current_amount", "updated_at"])
+            SavingsContribution.objects.create(goal=goal, amount=amount)
         _notify_user(self.request.user, "Savings added", f"{amount} was added to {goal.name}.")
+        if previous_amount < goal.target_amount <= goal.current_amount:
+            _notify_user(self.request.user, "Savings goal completed", f"You reached your {goal.name} savings goal.")
         return Response(self.get_serializer(goal).data)
 
     @action(detail=True, methods=["post"], url_path="withdraw-money")
@@ -410,6 +545,8 @@ class DashboardViewSet(viewsets.ViewSet):
         monthly_budget = Budget.objects.filter(user=request.user, month=today.month, year=today.year).aggregate(total=Sum("amount"))["total"] or Decimal("0")
         today_expense = Expense.objects.filter(user=request.user, date=today).aggregate(total=Sum("amount"))["total"] or Decimal("0")
         monthly_expense = Expense.objects.filter(user=request.user, date__month=today.month, date__year=today.year).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+        monthly_income = Income.objects.filter(user=request.user, date__month=today.month, date__year=today.year).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+        financial_health = _financial_health(request.user, today, monthly_income, monthly_expense, monthly_budget)
 
         response = {
             "total_income": float(total_income),
@@ -420,10 +557,10 @@ class DashboardViewSet(viewsets.ViewSet):
             "today_expense": float(today_expense),
             "total_savings": float(total_income - total_expense),
             "current_month_expense": float(monthly_expense),
-            "current_month_income": float(
-                Income.objects.filter(user=request.user, date__month=today.month, date__year=today.year)
-                .aggregate(total=Sum("amount"))["total"] or Decimal("0")
-            ),
+            "current_month_income": float(monthly_income),
+            "savings_rate": financial_health["savings_rate"],
+            "financial_health": financial_health,
+            "expense_forecast": _expense_forecast(request.user, today, monthly_expense, monthly_budget),
             "expense_count": Expense.objects.filter(user=request.user).count(),
             "income_count": Income.objects.filter(user=request.user).count(),
             "category_breakdown": _build_category_summary(request.user),
