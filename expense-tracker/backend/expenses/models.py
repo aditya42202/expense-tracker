@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 
@@ -35,6 +37,8 @@ class Person(models.Model):
 
 
 class GroupMember(models.Model):
+    id: int
+
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="group_members")
     linked_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, blank=True, null=True, related_name="group_memberships")
     name = models.CharField(max_length=200)
@@ -50,6 +54,8 @@ class GroupMember(models.Model):
 
 
 class GroupExpense(models.Model):
+    id: int
+
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="group_expenses")
     title = models.CharField(max_length=255)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
@@ -68,8 +74,8 @@ class GroupExpense(models.Model):
 class GroupExpenseParticipant(models.Model):
     expense = models.ForeignKey(GroupExpense, on_delete=models.CASCADE, related_name="participants")
     member = models.ForeignKey(GroupMember, on_delete=models.CASCADE, related_name="expense_participations")
-    paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    share_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    share_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["expense", "member"], name="unique_group_expense_member")]
@@ -91,6 +97,8 @@ class SettlementTransaction(models.Model):
 
 
 class Expense(models.Model):
+    id: int
+
     PAYMENT_METHOD_CHOICES = [
         ("Cash", "Cash"),
         ("UPI", "UPI"),
@@ -117,6 +125,8 @@ class Expense(models.Model):
 
 
 class Income(models.Model):
+    id: int
+
     PAYMENT_METHOD_CHOICES = [
         ("Cash", "Cash"),
         ("UPI", "UPI"),
@@ -174,7 +184,7 @@ class SavingsGoal(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="savings_goals")
     name = models.CharField(max_length=200)
     target_amount = models.DecimalField(max_digits=12, decimal_places=2)
-    current_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    current_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     target_date = models.DateField(blank=True, null=True)
     description = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

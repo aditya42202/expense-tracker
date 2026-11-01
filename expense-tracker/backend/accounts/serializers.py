@@ -27,7 +27,7 @@ class RegisterSerializer(serializers.ModelSerializer):
                 user=User(name=attrs.get("name", ""), email=attrs.get("email", "")),
             )
         except DjangoValidationError as exc:
-            raise serializers.ValidationError({"password": exc.messages})
+            raise serializers.ValidationError({"password": exc.messages}) from exc
 
         email = attrs.get("email")
         if User.objects.filter(email__iexact=email).exists():
@@ -38,10 +38,15 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("confirm_password")
         password = validated_data.pop("password")
-        email = validated_data["email"]
+        email = validated_data.pop("email")
         try:
             with transaction.atomic():
-                return User.objects.create_user(password=password, is_active=False, **validated_data)
+                return User.objects.create_user(
+                    email=email,
+                    password=password,
+                    is_active=False,
+                    **validated_data,
+                )
         except IntegrityError:
             if User.objects.filter(email__iexact=email).exists():
                 raise serializers.ValidationError({"email": "A user with this email already exists."})
@@ -58,7 +63,7 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError({"email": "Email is required."})
 
         user = User.objects.filter(email__iexact=email).first()
-        if not user or not user.check_password(attrs["password"]):
+        if user is None or not user.check_password(attrs["password"]):
             raise serializers.ValidationError({"non_field_errors": ["Invalid email or password."]})
 
         if not user.is_active:
@@ -89,7 +94,7 @@ class ChangePasswordSerializer(serializers.Serializer):
 
         try:
             password_validation.validate_password(attrs["new_password"], user=user)
-        except serializers.ValidationError as exc:
-            raise serializers.ValidationError({"new_password": exc.messages})
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": exc.messages}) from exc
 
         return attrs

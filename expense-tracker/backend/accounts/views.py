@@ -1,5 +1,6 @@
 import secrets
 from datetime import timedelta
+from typing import cast
 
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.mail import send_mail
@@ -7,6 +8,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.serializers import TokenBlacklistSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 
@@ -56,7 +58,7 @@ def _validate_email_otp(user, code, purpose):
 
 
 def _token_response(user):
-    refresh = RefreshToken.for_user(user)
+    refresh = cast(RefreshToken, RefreshToken.for_user(user))
     return Response(
         {
             "user": UserProfileSerializer(user).data,
@@ -73,7 +75,7 @@ class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.save()
+            user = cast(User, serializer.save())
             # Temporarily disabled; keep this block to restore email verification later.
             # try:
             #     _send_email_otp(user)
@@ -91,7 +93,8 @@ class VerifyEmailOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = (request.data.get("email") or "").strip()
+        email_value = request.data.get("email")
+        email = email_value.strip() if isinstance(email_value, str) else ""
         code = str(request.data.get("otp") or "").strip()
         if not email or len(code) != 6 or not code.isdigit():
             return Response({"detail": "Enter the six-digit verification code."}, status=status.HTTP_400_BAD_REQUEST)
@@ -112,7 +115,8 @@ class ResendEmailOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = (request.data.get("email") or "").strip()
+        email_value = request.data.get("email")
+        email = email_value.strip() if isinstance(email_value, str) else ""
         user = User.objects.filter(email__iexact=email, is_active=False).first() if email else None
         if user:
             previous_otp = EmailOTP.objects.filter(user=user, purpose="registration").first()
@@ -131,7 +135,8 @@ class LoginView(APIView):
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.validated_data["user"]
+            validated_data = cast(dict[str, User], serializer.validated_data)
+            user = validated_data["user"]
             # Temporarily disabled; keep this block to restore login OTP later.
             # otp = EmailOTP.objects.filter(user=user, purpose="login").first()
             # can_send = not otp or otp.created_at <= timezone.now() - timedelta(seconds=60)
@@ -155,7 +160,8 @@ class VerifyLoginOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = (request.data.get("email") or "").strip()
+        email_value = request.data.get("email")
+        email = email_value.strip() if isinstance(email_value, str) else ""
         code = str(request.data.get("otp") or "").strip()
         if not email or len(code) != 6 or not code.isdigit():
             return Response({"detail": "Enter the six-digit login code."}, status=status.HTTP_400_BAD_REQUEST)
@@ -173,7 +179,8 @@ class ResendLoginOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = (request.data.get("email") or "").strip()
+        email_value = request.data.get("email")
+        email = email_value.strip() if isinstance(email_value, str) else ""
         user = User.objects.filter(email__iexact=email, is_active=True).first() if email else None
         otp = EmailOTP.objects.filter(user=user, purpose="login").first() if user else None
         can_resend = otp and otp.created_at <= timezone.now() - timedelta(seconds=60)
@@ -189,13 +196,10 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        try:
-            refresh_token = request.data["refresh"]
-            token = RefreshToken(refresh_token)
-            token.blacklist()
-            return Response({"message": "Logged out successfully."}, status=status.HTTP_200_OK)
-        except Exception:
+        serializer = TokenBlacklistSerializer(data=request.data)
+        if not serializer.is_valid():
             return Response({"error": "Invalid refresh token."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"message": "Logged out successfully."}, status=status.HTTP_200_OK)
 
 
 class ProfileView(APIView):
@@ -219,7 +223,8 @@ class ChangePasswordView(APIView):
     def post(self, request):
         serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
         if serializer.is_valid():
-            request.user.set_password(serializer.validated_data["new_password"])
+            validated_data = cast(dict[str, str], serializer.validated_data)
+            request.user.set_password(validated_data["new_password"])
             request.user.save()
             return Response({"message": "Password changed successfully."})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

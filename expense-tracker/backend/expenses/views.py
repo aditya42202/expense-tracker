@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import cast
 
 from django.db.models import Q, Sum
 from django.utils.dateparse import parse_date
@@ -18,6 +19,8 @@ from .serializers import (
     IncomeSerializer,
     NotificationSerializer,
     PersonSerializer,
+    ProfilePasswordChangeSerializer,
+    SavingsGoalAmountSerializer,
     SavingsGoalSerializer,
     UserSerializer,
     GroupExpenseSerializer,
@@ -255,7 +258,10 @@ class SavingsGoalViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="add-money")
     def add_money(self, request, pk=None):
         goal = self.get_object()
-        amount = Decimal(str(request.data.get("amount", 0)))
+        amount_serializer = SavingsGoalAmountSerializer(data=request.data)
+        if not amount_serializer.is_valid():
+            return Response(amount_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        amount = cast(dict[str, Decimal], amount_serializer.validated_data)["amount"]
         goal.current_amount += amount
         goal.save()
         _notify_user(self.request.user, "Savings added", f"{amount} was added to {goal.name}.")
@@ -264,7 +270,10 @@ class SavingsGoalViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="withdraw-money")
     def withdraw_money(self, request, pk=None):
         goal = self.get_object()
-        amount = Decimal(str(request.data.get("amount", 0)))
+        amount_serializer = SavingsGoalAmountSerializer(data=request.data)
+        if not amount_serializer.is_valid():
+            return Response(amount_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        amount = cast(dict[str, Decimal], amount_serializer.validated_data)["amount"]
         goal.current_amount = max(Decimal("0"), goal.current_amount - amount)
         goal.save()
         return Response(self.get_serializer(goal).data)
@@ -340,7 +349,7 @@ class SettlementViewSet(viewsets.GenericViewSet):
         balances, transfers = calculate_combined_settlement(
             [
                 {
-                    "member_id": row.member_id,
+                    "member_id": row.member.id,
                     "name": row.member.name,
                     "paid_amount": row.paid_amount,
                     "share_amount": row.share_amount,
@@ -349,8 +358,8 @@ class SettlementViewSet(viewsets.GenericViewSet):
             ],
             [
                 {
-                    "from_member_id": row.from_member_id,
-                    "to_member_id": row.to_member_id,
+                    "from_member_id": row.from_member.id,
+                    "to_member_id": row.to_member.id,
                     "amount": row.amount,
                 }
                 for row in settled_transactions
@@ -366,14 +375,13 @@ class SettlementViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["get"])
     def summary(self, request):
         member, _ = GroupMember.objects.get_or_create(owner=request.user, name=request.user.name)
-        expenses = GroupExpense.objects.filter(owner=request.user).prefetch_related("participants")
+        expenses = GroupExpense.objects.filter(owner=request.user)
         total = sum((expense.amount for expense in expenses), Decimal("0"))
         paid = share = Decimal("0")
-        for expense in expenses:
-            row = next((item for item in expense.participants.all() if item.member_id == member.id), None)
-            if row:
-                paid += row.paid_amount
-                share += row.share_amount
+        member_participations = GroupExpenseParticipant.objects.filter(expense__in=expenses, member=member)
+        for participation in member_participations:
+            paid += participation.paid_amount
+            share += participation.share_amount
         return Response({
             "total_group_expenses": total,
             "your_contribution": paid,
@@ -468,6 +476,8 @@ class DashboardViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"], url_path="reports")
     def reports(self, request):
         aggregate = self.list(request).data
+        if not isinstance(aggregate, dict):
+            raise TypeError("Dashboard data must be a JSON object.")
         return Response({
             "summary": {
                 "total_income": aggregate["total_income"],
@@ -509,20 +519,22 @@ class ProfileViewSet(viewsets.ViewSet):
 
     def update(self, request):
         user = request.user
-        user.name = request.data.get("name", user.name)
-        if request.data.get("profile_image"):
-            user.profile_image = request.data.get("profile_image")
-        user.save()
+        serializer = UserSerializer(user, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
         return Response(UserSerializer(user).data)
 
     @action(detail=False, methods=["post"], url_path="change-password")
     def change_password(self, request):
-        current = request.data.get("current_password")
-        new_password = request.data.get("new_password")
-        if not request.user.check_password(current):
+        serializer = ProfilePasswordChangeSerializer(data=request.data)
+        if not serializer.is_valid():
+            if "new_password" in serializer.errors:
+                return Response({"error": "Password must be at least 8 characters"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        validated_data = cast(dict[str, str], serializer.validated_data)
+        if not request.user.check_password(validated_data["current_password"]):
             return Response({"error": "Current password is incorrect"}, status=status.HTTP_400_BAD_REQUEST)
-        if len(new_password) < 8:
-            return Response({"error": "Password must be at least 8 characters"}, status=status.HTTP_400_BAD_REQUEST)
-        request.user.set_password(new_password)
+        request.user.set_password(validated_data["new_password"])
         request.user.save()
         return Response({"message": "Password updated successfully"})

@@ -1,4 +1,9 @@
+import json
+from collections.abc import Mapping
+from typing import cast
+
 from django.core import mail
+from django.http import HttpResponse
 from django.test import TestCase
 from django.test.utils import override_settings
 from rest_framework.test import APIClient
@@ -6,6 +11,17 @@ from rest_framework.test import APIClient
 from accounts.models import User
 from expenses.models import Category
 from expenses.models import Notification
+
+
+def _post_json(client: APIClient, path: str, payload: Mapping[str, object]) -> HttpResponse:
+    return cast(HttpResponse, client.post(path, payload, format="json"))
+
+
+def _response_json(response: HttpResponse) -> dict[str, object]:
+    data = json.loads(response.content)
+    if not isinstance(data, dict):
+        raise AssertionError("Expected a JSON object response.")
+    return cast(dict[str, object], data)
 
 
 class AuthFlowTests(TestCase):
@@ -19,7 +35,7 @@ class AuthFlowTests(TestCase):
             "confirm_password": "StrongPass123",
         }
 
-        response = client.post("/api/auth/register/", payload, format="json")
+        response = _post_json(client, "/api/auth/register/", payload)
 
         self.assertEqual(response.status_code, 201)
         self.assertGreaterEqual(Category.objects.filter(user__email="jane@example.com").count(), 2)
@@ -52,14 +68,14 @@ class AuthFlowTests(TestCase):
         )
         self.assertTrue(user.is_active)
         self.assertEqual(mail.outbox, [])
-        login_response = client.post(
+        login_response = _post_json(
+            client,
             "/api/auth/login/",
             {"email": payload["email"], "password": payload["password"]},
-            format="json",
         )
         self.assertEqual(login_response.status_code, 200)
-        self.assertIn("access", login_response.json())
-        self.assertIn("refresh", login_response.json())
+        self.assertIn("access", _response_json(login_response))
+        self.assertIn("refresh", _response_json(login_response))
         self.assertEqual(mail.outbox, [])
 
     def test_registration_rejects_invalid_inputs_and_duplicate_emails(self):
@@ -86,12 +102,12 @@ class AuthFlowTests(TestCase):
 
         for case, payload, expected_field in cases:
             with self.subTest(case=case):
-                response = client.post("/api/auth/register/", payload, format="json")
+                response = _post_json(client, "/api/auth/register/", payload)
                 self.assertEqual(response.status_code, 400)
                 if expected_field:
-                    self.assertIn(expected_field, response.json())
+                    self.assertIn(expected_field, _response_json(response))
                 else:
-                    self.assertTrue({"name", "email", "password", "confirm_password"}.issubset(response.json()))
+                    self.assertTrue({"name", "email", "password", "confirm_password"}.issubset(_response_json(response)))
 
         self.assertEqual(User.objects.count(), 1)
 
@@ -104,14 +120,14 @@ class AuthFlowTests(TestCase):
         )
         client = APIClient()
 
-        login = client.post(
+        login = _post_json(
+            client,
             "/api/auth/login/",
             {"email": user.email, "password": "StrongPass123"},
-            format="json",
         )
         self.assertEqual(login.status_code, 200)
-        self.assertIn("access", login.json())
-        self.assertIn("refresh", login.json())
+        self.assertIn("access", _response_json(login))
+        self.assertIn("refresh", _response_json(login))
         self.assertEqual(mail.outbox, [])
 
     def test_new_person_creates_notification_for_authenticated_user(self):
@@ -123,7 +139,7 @@ class AuthFlowTests(TestCase):
         client = APIClient()
         client.force_authenticate(user=user)
 
-        response = client.post("/api/people/", {"name": "Sam"}, format="json")
+        response = _post_json(client, "/api/people/", {"name": "Sam"})
 
         self.assertEqual(response.status_code, 201)
         notification = Notification.objects.get(user=user)
@@ -138,23 +154,15 @@ class AuthFlowTests(TestCase):
             password="StrongPass123",
         )
         client = APIClient()
-        login = client.post(
+        login = _post_json(
+            client,
             "/api/auth/login/",
             {"email": user.email, "password": "StrongPass123"},
-            format="json",
         )
-        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.json()['access']}")
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {_response_json(login)['access']}")
 
-        logout = client.post(
-            "/api/auth/logout/",
-            {"refresh": login.json()["refresh"]},
-            format="json",
-        )
-        refresh = client.post(
-            "/api/auth/refresh/",
-                {"refresh": login.json()["refresh"]},
-            format="json",
-        )
+        logout = _post_json(client, "/api/auth/logout/", {"refresh": _response_json(login)["refresh"]})
+        refresh = _post_json(client, "/api/auth/refresh/", {"refresh": _response_json(login)["refresh"]})
 
         self.assertEqual(login.status_code, 200)
         self.assertEqual(logout.status_code, 200)

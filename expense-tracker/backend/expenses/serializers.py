@@ -15,6 +15,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ["id", "name", "email", "profile_image", "created_at"]
+        read_only_fields = ["id", "email", "created_at"]
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -258,7 +259,17 @@ class SavingsGoalSerializer(serializers.ModelSerializer):
     def get_progress(self, obj):
         if obj.target_amount == 0:
             return 0
-        return round((float(obj.current_amount) / float(obj.target_amount)) * 100, 2)
+        progress = obj.current_amount * Decimal("100") / obj.target_amount
+        return float(round(progress, 2))
+
+
+class SavingsGoalAmountSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
+
+
+class ProfilePasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=8)
 
 
 class NotificationSerializer(serializers.ModelSerializer):
