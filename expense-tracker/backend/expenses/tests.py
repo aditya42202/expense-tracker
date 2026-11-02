@@ -1,8 +1,11 @@
 import calendar
+import json
 from datetime import date
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
 from typing import Any, cast
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -387,6 +390,60 @@ class ExpenseApiTests(TestCase):
         self.assertFalse(status_response.json()["configured"])
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["code"], "ai_not_configured")
+
+    def test_ai_endpoint_reports_actionable_provider_configuration_errors(self):
+        cases = [
+            (
+                401,
+                {"error": {"code": "invalid_api_key"}},
+                503,
+                "ai_invalid_api_key",
+                "OPENAI_API_KEY",
+            ),
+            (
+                429,
+                {"error": {"code": "insufficient_quota", "type": "insufficient_quota"}},
+                503,
+                "ai_insufficient_quota",
+                "quota",
+            ),
+            (
+                404,
+                {"error": {"code": "model_not_found"}},
+                503,
+                "ai_model_not_found",
+                "OPENAI_MODEL",
+            ),
+            (
+                429,
+                {"error": {"code": "rate_limit_exceeded", "type": "requests"}},
+                429,
+                "ai_rate_limit_exceeded",
+                "rate limit",
+            ),
+        ]
+        for provider_status, provider_body, expected_status, expected_code, detail in cases:
+            with self.subTest(provider_code=expected_code):
+                provider_error = HTTPError(
+                    "https://api.openai.com/v1/chat/completions",
+                    provider_status,
+                    "Provider error",
+                    {},
+                    BytesIO(json.dumps(provider_body).encode()),
+                )
+                with (
+                    patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+                    patch("expenses.ai_views.urlopen", side_effect=provider_error),
+                ):
+                    response = self.client.post(
+                        "/api/ai/insights/",
+                        {"consent": True},
+                        format="json",
+                    )
+
+                self.assertEqual(response.status_code, expected_status)
+                self.assertEqual(response.json()["code"], expected_code)
+                self.assertIn(detail, response.json()["detail"])
 
     @patch("expenses.ai_views._request_ai", return_value="Food")
     def test_ai_categorization_is_restricted_to_account_categories(self, request_ai):

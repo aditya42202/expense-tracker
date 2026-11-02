@@ -1,7 +1,9 @@
 import json
+import logging
 import os
 from datetime import timedelta
 from decimal import Decimal
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from django.db.models import Count, Sum
@@ -14,13 +16,17 @@ from rest_framework.views import APIView
 
 from .models import AIInsight, Budget, Category, Expense, SavingsGoal
 
+logger = logging.getLogger(__name__)
+
 
 class AIConfigurationError(Exception):
     pass
 
 
 class AIProviderError(Exception):
-    pass
+    def __init__(self, code="provider_unavailable"):
+        self.code = code
+        super().__init__(code)
 
 
 def _financial_context(user):
@@ -106,14 +112,45 @@ def _request_ai(system_prompt, user_payload):
     try:
         with urlopen(request, timeout=20) as response:
             response_data = json.loads(response.read())
+    except HTTPError as error:
+        try:
+            error_data = json.loads(error.read())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            error_data = {}
+        provider_error = error_data.get("error", {}) if isinstance(error_data, dict) else {}
+        provider_code = provider_error.get("code") if isinstance(provider_error, dict) else None
+        provider_type = provider_error.get("type") if isinstance(provider_error, dict) else None
+        if provider_code == "insufficient_quota":
+            error_code = "insufficient_quota"
+        elif provider_code == "invalid_api_key" or error.code in (401, 403):
+            error_code = "invalid_api_key"
+        elif provider_code == "model_not_found" or error.code == 404:
+            error_code = "model_not_found"
+        elif provider_code == "rate_limit_exceeded" or (
+            error.code == 429 and provider_type != "insufficient_quota"
+        ):
+            error_code = "rate_limit_exceeded"
+        elif error.code == 400:
+            error_code = "invalid_request"
+        else:
+            error_code = "provider_unavailable"
+        logger.warning(
+            "OpenAI request failed with HTTP %s (provider code: %s)",
+            error.code,
+            error_code,
+        )
+        raise AIProviderError(error_code) from error
     except (OSError, json.JSONDecodeError) as error:
+        logger.warning("OpenAI request failed due to a network or response error: %s", error)
         raise AIProviderError from error
 
     try:
         content = response_data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as error:
+        logger.warning("OpenAI returned a response without a chat completion.")
         raise AIProviderError from error
     if not isinstance(content, str) or not content.strip():
+        logger.warning("OpenAI returned an empty chat completion.")
         raise AIProviderError
     return content.strip()
 
@@ -139,13 +176,39 @@ def _ai_response(request, feature, system_prompt, payload, allowed_values=None):
             },
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-    except AIProviderError:
+    except AIProviderError as error:
+        provider_errors = {
+            "invalid_api_key": (
+                "OpenAI rejected the API key. Check OPENAI_API_KEY in the backend service environment."
+            ),
+            "insufficient_quota": (
+                "The OpenAI account has no available API quota. Check its billing and usage limits."
+            ),
+            "rate_limit_exceeded": (
+                "The OpenAI rate limit was reached. Wait a moment and try again."
+            ),
+            "model_not_found": (
+                "The configured OpenAI model is unavailable. Check the OPENAI_MODEL backend setting."
+            ),
+            "invalid_request": (
+                "OpenAI rejected the request. Check the configured model and provider settings."
+            ),
+        }
         return Response(
             {
-                "code": "ai_provider_unavailable",
-                "detail": "The AI provider could not complete this request. Please try again later.",
+                "code": f"ai_{error.code}",
+                "detail": provider_errors.get(
+                    error.code,
+                    "The AI provider could not complete this request. Please try again later.",
+                ),
             },
-            status=status.HTTP_502_BAD_GATEWAY,
+            status=(
+                status.HTTP_429_TOO_MANY_REQUESTS
+                if error.code == "rate_limit_exceeded"
+                else status.HTTP_503_SERVICE_UNAVAILABLE
+                if error.code in {"invalid_api_key", "insufficient_quota", "model_not_found"}
+                else status.HTTP_502_BAD_GATEWAY
+            ),
         )
     if allowed_values is not None:
         normalized = content.strip().strip("\"'`")
