@@ -2,8 +2,10 @@ import hashlib
 import hmac
 import logging
 import secrets
+from collections.abc import Mapping
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
+from typing import Any, cast
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -580,7 +582,7 @@ class GroupChatView(APIView):
             created = True
         else:
             raise ValidationError({"message_type": "Choose TEXT or EXPENSE."})
-        serialized = ChatMessageSerializer(message).data
+        serialized = cast(Mapping[str, Any], ChatMessageSerializer(message).data)
         delivery_status = "polling"
         try:
             channel_layer = get_channel_layer()
