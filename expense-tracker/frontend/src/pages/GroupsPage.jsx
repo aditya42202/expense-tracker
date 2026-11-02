@@ -33,6 +33,7 @@ export default function GroupsPage() {
   const [olderBefore, setOlderBefore] = useState(null);
   const [messageText, setMessageText] = useState('');
   const [connection, setConnection] = useState('connecting');
+  const [reconnectKey, setReconnectKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -90,9 +91,11 @@ export default function GroupsPage() {
     loadWorkspace(groupId);
     let live = true;
     let socket;
+    let socketTimeout;
     let reconnectTimer;
     let pollingTimer;
     let retryDelay = 1000;
+    let failedAttempts = 0;
     let latestMessageId = 0;
 
     const pollMessages = async () => {
@@ -113,8 +116,11 @@ export default function GroupsPage() {
           await api.post(`/groups/${groupId}/chat/read/`);
           await loadGroups();
         }
-      } catch {
-        if (live) setConnection('disconnected');
+      } catch (pollError) {
+        if (live) {
+          setConnection('disconnected');
+          setError(displayError(pollError, 'Unable to sync group chat. Check the connection and try again.'));
+        }
       }
     };
 
@@ -135,6 +141,16 @@ export default function GroupsPage() {
       retryDelay = Math.min(retryDelay * 2, 30000);
     };
 
+    const handleConnectionFailure = () => {
+      startPolling();
+      failedAttempts += 1;
+      if (failedAttempts <= 3) {
+        scheduleReconnect();
+      } else {
+        setConnection('fallback');
+      }
+    };
+
     const connect = async () => {
       try {
         const { data } = await api.post(`/groups/${groupId}/chat/ticket/`);
@@ -146,9 +162,15 @@ export default function GroupsPage() {
         wsUrl.searchParams.set('ticket', data.ticket);
         socket = new WebSocket(wsUrl.toString());
         socketRef.current = socket;
+        socketTimeout = window.setTimeout(() => {
+          if (socket?.readyState === WebSocket.CONNECTING) socket.close();
+        }, 8000);
         socket.onopen = () => {
           if (!live) return;
+          window.clearTimeout(socketTimeout);
           setConnection('connected');
+          setError('');
+          failedAttempts = 0;
           retryDelay = 1000;
           window.clearInterval(pollingTimer);
           pollingTimer = undefined;
@@ -156,9 +178,9 @@ export default function GroupsPage() {
           reconnectTimer = undefined;
         };
         socket.onclose = () => {
+          window.clearTimeout(socketTimeout);
           if (!live) return;
-          startPolling();
-          scheduleReconnect();
+          handleConnectionFailure();
         };
         socket.onerror = () => socket?.close();
         socket.onmessage = (event) => {
@@ -171,21 +193,19 @@ export default function GroupsPage() {
           });
         };
       } catch {
-        if (live) {
-          startPolling();
-          scheduleReconnect();
-        }
+        if (live) handleConnectionFailure();
       }
     };
     connect();
     return () => {
       live = false;
+      window.clearTimeout(socketTimeout);
       window.clearTimeout(reconnectTimer);
       window.clearInterval(pollingTimer);
       socket?.close();
       socketRef.current = null;
     };
-  }, [groupId, loadWorkspace, loadGroups, user?.id]);
+  }, [groupId, loadWorkspace, loadGroups, user?.id, reconnectKey]);
 
   useEffect(() => {
     setGroupForm({ name: selectedGroup?.name || '', description: selectedGroup?.description || '' });
@@ -516,7 +536,7 @@ export default function GroupsPage() {
               </div>
 
               <section className="flex min-h-105 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · <span className={connection === 'connected' ? 'text-emerald-600' : connection === 'polling' ? 'text-amber-600' : 'text-rose-600'}>{connection === 'connected' ? 'live' : connection === 'polling' ? 'backup mode · retrying live connection' : connection}</span></p></div></div></header>
+                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · <span className={connection === 'connected' ? 'text-emerald-600' : connection === 'fallback' ? 'text-rose-600' : 'text-amber-600'}>{connection === 'connected' ? 'live' : connection === 'fallback' ? 'backup mode · live server unavailable' : connection === 'polling' ? 'backup mode · retrying live connection' : connection}</span></p></div></div>{connection === 'fallback' && <button type="button" onClick={() => setReconnectKey((key) => key + 1)} className="rounded-lg border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">Retry live</button>}</header>
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
                   {olderBefore && <button onClick={loadOlderMessages} className="w-full rounded-lg bg-slate-50 py-2 text-xs font-medium text-indigo-700">Load older messages</button>}
                   {!messages.length && <p className="py-12 text-center text-sm text-slate-500">Start the conversation.</p>}
