@@ -155,6 +155,19 @@ const hindi = {
   'Create account': 'खाता बनाएँ', 'Already have an account?': 'पहले से खाता है?', Weak: 'कमज़ोर', Fair: 'ठीक', Good: 'अच्छा', Strong: 'मज़बूत',
   'Passwords do not match.': 'पासवर्ड मेल नहीं खाते।', 'Unable to verify the code.': 'कोड सत्यापित नहीं हो सका।',
   'Unable to resend the code. Please try again.': 'कोड फिर नहीं भेजा जा सका। कृपया दोबारा कोशिश करें।', 'Registration failed.': 'खाता नहीं बन सका।',
+  'Share on WhatsApp': 'WhatsApp पर साझा करें', 'Choose message type, review details, and share.': 'संदेश का प्रकार चुनें, जानकारी जाँचें और साझा करें।',
+  'Expense Message': 'खर्च का संदेश', 'Settlement Message': 'हिसाब का संदेश', 'MoneyMind Group Expense': 'MoneyMind समूह खर्च',
+  'Member-wise Breakdown': 'सदस्यवार बँटवारा', Member: 'सदस्य', Share: 'हिस्सा', 'Total Amount': 'कुल राशि',
+  'Each Share': 'प्रत्येक का हिस्सा', 'Copy Message': 'संदेश कॉपी करें', 'Share Receipt': 'रसीद साझा करें',
+  'Add Note': 'नोट जोड़ें', 'Write a note to include with the message': 'संदेश के साथ भेजने के लिए नोट लिखें',
+  'Share Via WhatsApp': 'WhatsApp से साझा करें', 'Share to Group': 'समूह में साझा करें', 'Message copied.': 'संदेश कॉपी हो गया।',
+  'Unable to copy the message. Check your browser clipboard permissions.': 'संदेश कॉपी नहीं हुआ। ब्राउज़र की क्लिपबोर्ड अनुमति जाँचें।',
+  'Receipt shared.': 'रसीद साझा हो गई।', 'Receipt downloaded. You can attach it to your message.': 'रसीद डाउनलोड हो गई। इसे अपने संदेश के साथ जोड़ें।',
+  'Choose a group to share this expense.': 'यह खर्च साझा करने के लिए समूह चुनें।',
+  'Unable to share the receipt. Please try again.': 'रसीद साझा नहीं हो सकी। कृपया फिर कोशिश करें।',
+  'Unable to open the share options. Please try again.': 'साझा करने के विकल्प नहीं खुल सके। कृपया फिर कोशिश करें।',
+  Close: 'बंद करें', Note: 'नोट', Pending: 'बाकी', Expense: 'खर्च', Total: 'कुल', 'Shared expenses': 'साझा खर्च',
+  'Paid By': 'भुगतानकर्ता',
 };
 
 export function LanguageProvider({ children }) {
