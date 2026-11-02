@@ -1,16 +1,39 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownLeft, ArrowUpRight, MessageCircle, Plus, Send, Share2, Users } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
-import api from '../services/api';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import api, { API_BASE_URL } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 const today = new Date().toISOString().slice(0, 10);
 const emptyExpense = () => ({ title: '', amount: '', date: today, category: '', split_type: 'equal' });
-const displayError = (error, fallback) => Object.values(error.response?.data || {}).flat()?.[0] || fallback;
+const mergeMessages = (current, incoming) => {
+  const messagesById = new Map(current.map((message) => [message.id, message]));
+  incoming.forEach((message) => messagesById.set(message.id, message));
+  return [...messagesById.values()].sort((left, right) => left.id - right.id);
+};
+const displayError = (error, fallback) => {
+  const status = error.response?.status;
+  const statusMessages = {
+    401: 'Your session has expired. Please sign in again.',
+    403: 'You do not have permission to perform this action.',
+    404: 'This group or invitation could not be found.',
+    500: 'The server could not complete this request. Please try again later.',
+  };
+  if (statusMessages[status]) return statusMessages[status];
+  if (!error.response) return 'Unable to reach the server. Check your internet connection and try again.';
+  const payload = error.response.data;
+  const details = payload && typeof payload === 'object'
+    ? Object.values(payload).flat(Infinity).find((value) => typeof value === 'string')
+    : null;
+  return details && !details.includes('Traceback') ? details : fallback;
+};
 
 export default function GroupsPage() {
   const { user } = useAuth();
+  const { code: inviteCodePath } = useParams();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const inviteToken = searchParams.get('invite') || '';
   const [groups, setGroups] = useState([]);
   const [groupId, setGroupId] = useState('');
   const [createForm, setCreateForm] = useState({ name: '', description: '' });
@@ -20,7 +43,7 @@ export default function GroupsPage() {
   const [percentageShares, setPercentageShares] = useState({});
   const [payerAmounts, setPayerAmounts] = useState({});
   const [inviteEmail, setInviteEmail] = useState('');
-  const [invite, setInvite] = useState({ groupId: '', code: '', url: '' });
+  const [invite, setInvite] = useState({ groupId: '', code: '', url: '', expiresAt: '' });
   const [joinToken, setJoinToken] = useState('');
   const [expenses, setExpenses] = useState([]);
   const [balances, setBalances] = useState({ balances: [], suggested_transfers: [] });
@@ -35,16 +58,20 @@ export default function GroupsPage() {
   const [connection, setConnection] = useState('connecting');
   const [reconnectKey, setReconnectKey] = useState(0);
   const [groupsRetryKey, setGroupsRetryKey] = useState(0);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [inviteLoading, setInviteLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [groupsError, setGroupsError] = useState('');
   const [chatError, setChatError] = useState('');
   const [notice, setNotice] = useState('');
   const socketRef = useRef(null);
+  const inviteRequestsRef = useRef(new Map());
   const selectedGroup = useMemo(() => groups.find((group) => String(group.id) === String(groupId)), [groups, groupId]);
   const members = selectedGroup?.members || [];
   const myMembership = members.find((member) => member.user_id === user?.id);
   const money = useMemo(() => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'INR' }), []);
+  const joiningInvite = Boolean(inviteCodePath || inviteToken);
 
   const loadGroups = useCallback(async () => {
     const { data } = await api.get('/groups/');
@@ -58,18 +85,49 @@ export default function GroupsPage() {
     let active = true;
     loadGroups()
       .catch((loadError) => active && setGroupsError(displayError(loadError, 'Unable to load groups.')))
-      .finally(() => active && setLoading(false));
-    const token = searchParams.get('invite');
-    if (token) {
-      api.post('/groups/join/', { token }).then(({ data }) => {
-        if (!active) return;
-        setNotice(`Joined ${data.name}.`);
-        setSearchParams({}, { replace: true });
-        return loadGroups().then(() => setGroupId(String(data.id)));
-      }).catch((joinError) => active && setError(displayError(joinError, 'Unable to join this group.')));
-    }
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+          setGroupsLoading(false);
+        }
+      });
     return () => { active = false; };
-  }, [groupsRetryKey, loadGroups, searchParams, setSearchParams]);
+  }, [groupsRetryKey, loadGroups]);
+
+  useEffect(() => {
+    if (!inviteCodePath && !inviteToken) return undefined;
+    let active = true;
+    const requestKey = inviteCodePath ? `code:${inviteCodePath}` : `token:${inviteToken}`;
+    let request = inviteRequestsRef.current.get(requestKey);
+    if (!request) {
+      request = api.post('/groups/join/', inviteCodePath ? { code: inviteCodePath } : { token: inviteToken });
+      inviteRequestsRef.current.set(requestKey, request);
+      request.finally(() => {
+        if (inviteRequestsRef.current.get(requestKey) === request) {
+          inviteRequestsRef.current.delete(requestKey);
+        }
+      }).catch(() => {});
+    }
+    request.then(async ({ data }) => {
+      if (!active) return;
+      setNotice(`Joined ${data.name}.`);
+      setGroupId(String(data.id));
+      if (inviteCodePath) navigate('/groups', { replace: true });
+      else setSearchParams({}, { replace: true });
+      try {
+        await loadGroups();
+        if (active) setGroupId(String(data.id));
+      } catch (loadError) {
+        if (active) setGroupsError(displayError(loadError, 'You joined the group, but the group list could not be refreshed.'));
+      }
+    }).catch((joinError) => {
+      if (!active) return;
+      setError(displayError(joinError, 'Unable to join this group.'));
+      if (inviteCodePath) navigate('/groups', { replace: true });
+      else setSearchParams({}, { replace: true });
+    });
+    return () => { active = false; };
+  }, [inviteCodePath, inviteToken, loadGroups, navigate, setSearchParams]);
 
   const loadWorkspace = useCallback(async (id) => {
     if (!id) return;
@@ -116,11 +174,7 @@ export default function GroupsPage() {
           (message) => message.id > latestMessageId && message.sender_id !== user?.id,
         );
         latestMessageId = Math.max(latestMessageId, ...data.results.map((message) => message.id), 0);
-        setMessages((current) => {
-          const merged = new Map(current.map((message) => [message.id, message]));
-          data.results.forEach((message) => merged.set(message.id, message));
-          return [...merged.values()].sort((left, right) => left.id - right.id);
-        });
+        setMessages((current) => mergeMessages(current, data.results));
         setOlderBefore(data.next_before);
         if (hasUnreadMessages) {
           await api.post(`/groups/${groupId}/chat/read/`);
@@ -164,12 +218,11 @@ export default function GroupsPage() {
     const connect = async () => {
       try {
         const { data } = await api.post(`/groups/${groupId}/chat/ticket/`);
-        if (!live) return;
-        const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
-        const apiOrigin = new URL(apiUrl).origin;
-        const wsUrl = new URL(`/ws/groups/${groupId}/chat/`, apiOrigin);
-        wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsUrl.searchParams.set('ticket', data.ticket);
+          if (!live) return;
+          const apiOrigin = new URL(API_BASE_URL).origin;
+          const wsUrl = new URL(`/ws/groups/${groupId}/chat/`, apiOrigin);
+          wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+          wsUrl.searchParams.set('ticket', data.ticket);
         socket = new WebSocket(wsUrl.toString());
         socketRef.current = socket;
         socketTimeout = window.setTimeout(() => {
@@ -197,7 +250,7 @@ export default function GroupsPage() {
           const payload = JSON.parse(event.data);
           if (payload.type !== 'message') return;
           latestMessageId = Math.max(latestMessageId, payload.message.id);
-          setMessages((current) => current.some((message) => message.id === payload.message.id) ? current : [...current, payload.message]);
+          setMessages((current) => mergeMessages(current, [payload.message]));
           api.post(`/groups/${groupId}/chat/read/`).then(() => loadGroups()).catch((readError) => {
             setError(displayError(readError, 'Unable to update the chat read status.'));
           });
@@ -276,16 +329,31 @@ export default function GroupsPage() {
   };
 
   const createInvite = async () => {
+    setInviteLoading(true);
     try {
       const { data } = await api.post(`/groups/${groupId}/invite/`);
-      const inviteUrl = new URL('/groups', window.location.origin);
-      inviteUrl.searchParams.set('invite', data.token);
-      setInvite({ groupId, code: data.code, url: inviteUrl.toString() });
+      const inviteUrl = new URL(`/g/join/${data.code}`, window.location.origin);
+      setInvite({ groupId, code: data.code, url: inviteUrl.toString(), expiresAt: data.expires_at });
       setNotice('Invitation code and link created. They expire in 7 days.');
       setError('');
     } catch (inviteError) {
       setError(displayError(inviteError, 'Unable to create an invite.'));
+    } finally {
+      setInviteLoading(false);
     }
+  };
+
+  const shareInvite = async () => {
+    const text = `Join ${selectedGroup.name} on MoneyMind with this invite code: ${invite.code}\n${invite.url}\nExpires ${new Date(invite.expiresAt).toLocaleString()}`;
+    if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+      try {
+        await navigator.share({ title: `Join ${selectedGroup.name} on MoneyMind`, text, url: invite.url });
+        return;
+      } catch (shareError) {
+        if (shareError.name === 'AbortError') return;
+      }
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   };
 
   const copyInviteValue = async (value, label) => {
@@ -412,9 +480,11 @@ export default function GroupsPage() {
     }
     try {
       const { data } = await api.post(`/groups/${groupId}/chat/`, { text });
-      setMessages((current) => current.some((message) => message.id === data.id)
-        ? current
-        : [...current, data].sort((left, right) => left.id - right.id));
+      setMessages((current) => mergeMessages(current, [data]));
+      if (data.delivery_status === 'polling') {
+        setConnection('polling');
+        setChatError('Message saved. Live delivery is temporarily unavailable; chat will sync by polling.');
+      }
       setMessageText('');
       setError('');
     } catch (sendError) {
@@ -426,7 +496,7 @@ export default function GroupsPage() {
     if (!olderBefore) return;
     try {
       const { data } = await api.get(`/groups/${groupId}/chat/?limit=50&before=${olderBefore}`);
-      setMessages((current) => [...data.results, ...current]);
+      setMessages((current) => mergeMessages(current, data.results));
       setOlderBefore(data.next_before);
     } catch {
       setError('Unable to load older messages.');
@@ -449,7 +519,7 @@ export default function GroupsPage() {
         <p className="mt-3 max-w-2xl text-sm text-indigo-100">Plan shared spending, keep balances clear, and talk with your group in real time.</p>
       </header>
 
-      {(error || groupsError || chatError || notice) && <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${error || groupsError || chatError ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{error || groupsError || chatError || notice}{groupsError && <button type="button" className="ml-3 font-semibold underline" onClick={() => { setGroupsError(''); setLoading(true); setGroupsRetryKey((key) => key + 1); }}>Retry loading groups</button>}<button className="float-right font-semibold" onClick={() => { setError(''); setGroupsError(''); setChatError(''); setNotice(''); }}>Dismiss</button></div>}
+      {(error || groupsError || chatError || notice || joiningInvite) && <div role={joiningInvite ? 'status' : 'alert'} className={`rounded-xl border px-4 py-3 text-sm ${error || groupsError || chatError ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{joiningInvite ? 'Joining group invitation…' : error || groupsError || chatError || notice}{groupsError && <button type="button" disabled={groupsLoading} className="ml-3 font-semibold underline disabled:opacity-50" onClick={() => { setGroupsError(''); setGroupsLoading(true); setGroupsRetryKey((key) => key + 1); }}>{groupsLoading ? 'Retrying…' : 'Retry loading groups'}</button>}<button className="float-right font-semibold" onClick={() => { setError(''); setGroupsError(''); setChatError(''); setNotice(''); }}>Dismiss</button></div>}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(240px,0.7fr)_minmax(0,2fr)]">
         <aside className="space-y-4">
@@ -473,7 +543,7 @@ export default function GroupsPage() {
             <h2 className="font-semibold">Join with an invite</h2>
             <label htmlFor="group-invite-code" className="sr-only">Six-digit invitation code</label>
             <input id="group-invite-code" type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={joinToken} onChange={(event) => setJoinToken(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="Enter 6-digit invite code" className="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono tracking-widest" />
-            <button className="w-full rounded-xl border border-indigo-200 px-4 py-2 font-semibold text-indigo-700 hover:bg-indigo-50">Join group</button>
+            <button disabled={joinToken.length !== 6} className="w-full rounded-xl border border-indigo-200 px-4 py-2 font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50">Join group</button>
           </form>
         </aside>
 
@@ -493,20 +563,21 @@ export default function GroupsPage() {
                 <button disabled={myMembership?.role !== 'admin'} className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">Add member</button>
               </form>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={createInvite} disabled={myMembership?.role !== 'admin'} className="rounded-xl border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 disabled:opacity-40">Create invitation code and link</button>
+                <button type="button" onClick={createInvite} disabled={myMembership?.role !== 'admin' || inviteLoading} className="rounded-xl border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 disabled:opacity-40">{inviteLoading ? 'Generating invitation…' : 'Generate invitation code'}</button>
                 {invite.groupId === groupId && <>
                   <button type="button" onClick={() => copyInviteValue(invite.code, 'Invitation code')} className="rounded-xl bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">Copy code</button>
                   <button type="button" onClick={() => copyInviteValue(invite.url, 'Invitation link')} className="rounded-xl bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">Copy link</button>
+                  <button type="button" onClick={shareInvite} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Share on WhatsApp</button>
                 </>}
               </div>
               {invite.groupId === groupId && <div className="space-y-2 sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-600">Invite code (valid for 7 days)
+                <label className="block text-xs font-semibold text-slate-600">Invite code
                   <input readOnly value={invite.code} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700" />
                 </label>
                 <label className="block text-xs font-semibold text-slate-600">Invitation link
                   <input readOnly value={invite.url} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700" />
                 </label>
-                <p className="text-xs text-slate-500">Anyone with this code or link can join this group before it expires.</p>
+                <p className="text-xs text-slate-500">Expires {invite.expiresAt ? new Date(invite.expiresAt).toLocaleString() : 'in 7 days'}. Anyone with this code or link can join before expiry.</p>
               </div>}
             </div>
           </section>

@@ -1,16 +1,19 @@
 import hashlib
 import hmac
+import logging
 import secrets
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
+from django.db.models import Count, F, OuterRef, Prefetch, Q, Subquery
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
 from django.utils import timezone
+from redis.exceptions import RedisError
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -24,6 +27,39 @@ from .serializers import ChatMessageSerializer, GroupSerializer, MembershipSeria
 
 CENT = Decimal("0.01")
 MAX_AMOUNT = Decimal("9999999999.99")
+logger = logging.getLogger(__name__)
+
+
+def groups_for_user(user):
+    last_read_at = Membership.objects.filter(
+        group_id=OuterRef("pk"),
+        user_id=user.pk,
+        is_active=True,
+    ).values("last_read_at")[:1]
+    return (
+        Group.objects.filter(memberships__user_id=user.pk, memberships__is_active=True)
+        .annotate(membership_last_read_at=Subquery(last_read_at))
+        .annotate(
+            unread_count=Count(
+                "messages",
+                filter=(
+                    ~Q(messages__sender_id=user.pk)
+                    & (
+                        Q(messages__created_at__gt=F("membership_last_read_at"))
+                        | Q(membership_last_read_at__isnull=True)
+                    )
+                ),
+                distinct=True,
+            )
+        )
+        .prefetch_related(
+            Prefetch(
+                "memberships",
+                queryset=Membership.objects.filter(is_active=True).select_related("user"),
+                to_attr="active_memberships",
+            )
+        )
+    )
 
 
 def group_membership(group, user):
@@ -160,8 +196,11 @@ class GroupsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        memberships = Membership.objects.filter(user=request.user, is_active=True).select_related("group")
-        return Response([GroupSerializer(item.group, context={"membership": item}).data for item in memberships])
+        try:
+            return Response([GroupSerializer(group).data for group in groups_for_user(request.user)])
+        except DatabaseError:
+            logger.exception("Failed to load groups for user_id=%s", request.user.pk)
+            raise
 
     def post(self, request):
         serializer = GroupSerializer(data=request.data)
@@ -199,6 +238,12 @@ class GroupDetailView(APIView):
 
 class GroupMembersView(APIView):
     permission_classes = [IsAuthenticated]
+
+    def get(self, request, group_id):
+        group = get_object_or_404(Group, pk=group_id)
+        group_membership(group, request.user)
+        memberships = group.memberships.filter(is_active=True).select_related("user")
+        return Response(MembershipSerializer(memberships, many=True).data)
 
     def post(self, request, group_id):
         group = get_object_or_404(Group, pk=group_id)
@@ -492,10 +537,22 @@ class GroupChatView(APIView):
         channel_layer = get_channel_layer()
         if channel_layer is None:
             raise RuntimeError("The group chat channel layer is not configured.")
-        async_to_sync(channel_layer.group_send)(
-            f"group_chat_{group.id}", {"type": "chat.message", "message": serialized},
+        delivery_status = "live"
+        try:
+            async_to_sync(channel_layer.group_send)(
+                f"group_chat_{group.id}", {"type": "chat.message", "message": serialized},
+            )
+        except (RedisError, OSError, TimeoutError):
+            logger.exception(
+                "Failed to publish chat message_id=%s group_id=%s; message is persisted for polling",
+                message.pk,
+                group.pk,
+            )
+            delivery_status = "polling"
+        return Response(
+            {**serialized, "delivery_status": delivery_status},
+            status=status.HTTP_201_CREATED,
         )
-        return Response(serialized, status=status.HTTP_201_CREATED)
 
 
 class GroupChatReadView(APIView):

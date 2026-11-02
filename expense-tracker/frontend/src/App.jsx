@@ -63,6 +63,7 @@ function AppRoutes() {
       <Route path="/expenses" element={<ProtectedRoute><UnifiedExpensesPage /></ProtectedRoute>} />
       <Route path="/group-expenses" element={<Navigate to="/expenses?view=group" replace />} />
       <Route path="/groups" element={<ProtectedRoute><GroupsPage /></ProtectedRoute>} />
+      <Route path="/g/join/:code" element={<ProtectedRoute><GroupsPage /></ProtectedRoute>} />
       <Route path="/income" element={<ProtectedRoute><IncomePage /></ProtectedRoute>} />
       <Route path="/budget" element={<ProtectedRoute><BudgetPage /></ProtectedRoute>} />
       <Route path="/savings" element={<ProtectedRoute><SavingsPage /></ProtectedRoute>} />

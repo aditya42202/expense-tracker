@@ -23,9 +23,14 @@ class GroupSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_by", "created_at", "updated_at", "members", "unread_count"]
 
     def get_members(self, obj):
-        return MembershipSerializer(obj.memberships.filter(is_active=True).select_related("user"), many=True).data
+        memberships = getattr(obj, "active_memberships", None)
+        if memberships is None:
+            memberships = obj.memberships.filter(is_active=True).select_related("user")
+        return MembershipSerializer(memberships, many=True).data
 
     def get_unread_count(self, obj):
+        if hasattr(obj, "unread_count"):
+            return obj.unread_count
         membership = self.context.get("membership")
         if membership is None or membership.last_read_at is None:
             return obj.messages.exclude(sender_id=membership.user_id).count() if membership else 0

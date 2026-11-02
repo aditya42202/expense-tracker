@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import Any, Protocol, cast
 from unittest.mock import patch
 
@@ -5,6 +6,7 @@ from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
 from django.test import TransactionTestCase
 from django.utils import timezone
+from redis.exceptions import RedisError
 from rest_framework.test import APIClient
 
 from accounts.models import User
@@ -63,6 +65,19 @@ class GroupAPITests(TransactionTestCase):
         self.client.force_authenticate(self.outsider)
         self.assertEqual(self.client.get(f"/api/groups/{self.group.id}/").status_code, 404)
         self.assertEqual(self.client.get(f"/api/groups/{self.group.id}/expenses/").status_code, 404)
+
+    def test_group_list_and_member_list_return_active_members_only(self):
+        groups = self.client.get("/api/groups/")
+        self.assertEqual(groups.status_code, 200)
+        self.assertEqual([group["id"] for group in groups.data], [self.group.id])
+        self.assertEqual(groups.data[0]["unread_count"], 0)
+
+        members = self.client.get(f"/api/groups/{self.group.id}/members/")
+        self.assertEqual(members.status_code, 200)
+        self.assertEqual({member["user_id"] for member in members.data}, {self.owner.id, self.member.id})
+
+        self.client.force_authenticate(self.outsider)
+        self.assertEqual(self.client.get(f"/api/groups/{self.group.id}/members/").status_code, 404)
 
     def test_cors_preflight_allows_frontend_idempotency_key(self):
         response = self.client.options(
@@ -194,9 +209,34 @@ class GroupAPITests(TransactionTestCase):
         self.assertEqual(joined.status_code, 201, joined.data)
         self.assertEqual(joined.data["id"], self.group.id)
 
+    @patch("groups.views.secrets.randbelow", return_value=7)
+    def test_invitation_code_keeps_leading_zeroes_and_expires_after_seven_days(self, _randbelow):
+        before = timezone.now()
+        invite = self.client.post(f"/api/groups/{self.group.id}/invite/", {}, format="json")
+        after = timezone.now()
+
+        self.assertEqual(invite.status_code, 200)
+        self.assertEqual(invite.data["code"], "000007")
+        expiry = invite.data["expires_at"]
+        self.assertGreaterEqual(expiry, before + timedelta(days=7))
+        self.assertLessEqual(expiry, after + timedelta(days=7))
+
     def test_invalid_six_digit_invitation_code_is_rejected(self):
         response = self.client.post("/api/groups/join/", {"code": "12a456"}, format="json")
         self.assertEqual(response.status_code, 400)
+
+    def test_expired_invitation_code_and_link_are_rejected(self):
+        invite = self.client.post(f"/api/groups/{self.group.id}/invite/", {}, format="json")
+        self.group.refresh_from_db()
+        self.group.invite_expires_at = timezone.now() - timedelta(seconds=1)
+        self.group.save(update_fields=["invite_expires_at"])
+        self.client.force_authenticate(self.outsider)
+
+        expired_code = self.client.post("/api/groups/join/", {"code": invite.data["code"]}, format="json")
+        expired_link = self.client.post("/api/groups/join/", {"token": invite.data["token"]}, format="json")
+        self.assertEqual(expired_code.status_code, 400)
+        self.assertEqual(expired_link.status_code, 400)
+        self.assertFalse(Membership.objects.filter(group=self.group, user=self.outsider, is_active=True).exists())
 
     def test_invite_code_collision_retries_with_an_unused_code(self):
         second_group_response = self.client.post("/api/groups/", {"name": "Second group"}, format="json")
@@ -247,6 +287,23 @@ class GroupAPITests(TransactionTestCase):
         connected, close_code = async_to_sync(reuse_ticket)()
         self.assertFalse(connected)
         self.assertEqual(close_code, 4403)
+
+    @patch("groups.views.get_channel_layer")
+    def test_chat_message_is_saved_when_redis_delivery_is_unavailable(self, get_channel_layer):
+        class FailingChannelLayer:
+            async def group_send(self, *_args, **_kwargs):
+                raise RedisError("Redis unavailable")
+
+        get_channel_layer.return_value = FailingChannelLayer()
+        response = self.client.post(
+            f"/api/groups/{self.group.id}/chat/",
+            {"text": "Persist despite a Redis interruption"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["delivery_status"], "polling")
+        self.assertTrue(ChatMessage.objects.filter(group=self.group, text=response.data["text"]).exists())
 
     @patch("expenses.ai_views._request_ai", return_value="Food spending is the largest category.")
     def test_group_ai_insights_use_authorized_group_data(self, request_ai):
