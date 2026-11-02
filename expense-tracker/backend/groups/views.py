@@ -197,7 +197,12 @@ class GroupsView(APIView):
 
     def get(self, request):
         try:
-            return Response([GroupSerializer(group).data for group in groups_for_user(request.user)])
+            memberships = Membership.objects.filter(user=request.user, is_active=True).select_related("group")
+            return Response([
+                GroupSerializer(group, context={"membership": membership}).data
+                for membership in memberships
+                for group in [groups_for_user(request.user).get(pk=membership.group.id)]
+            ])
         except DatabaseError:
             logger.exception("Failed to load groups for user_id=%s", request.user.pk)
             raise
