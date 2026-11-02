@@ -88,7 +88,7 @@ Set backend environment variables in the host dashboard or secret manager:
 - `CSRF_TRUSTED_ORIGINS`: exact trusted HTTPS origins
 - `DATABASE_URL`: provider-issued PostgreSQL URL
 - SMTP settings for account verification email
-- `OPENAI_API_KEY`: optional server-side key for the MoneyMind AI features; never expose it as a `VITE_*` variable
+- `OPENAI_API_KEY`: optional server-side key for the MoneyMind AI features; add it as a secret in Render after creating the Blueprint, and never expose it as a `VITE_*` variable
 - `OPENAI_MODEL`: optional OpenAI chat-completions model name (defaults to `gpt-4o-mini`)
 
 AI requests require a separate in-app consent confirmation before the user's financial summary or expense description is sent to OpenAI. Without `OPENAI_API_KEY`, the AI pages remain visible and return a clear configuration message instead of generated or sample insights. AI responses are educational and may be incomplete.
