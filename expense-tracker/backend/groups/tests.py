@@ -266,6 +266,21 @@ class GroupAPITests(TransactionTestCase):
         self.assertEqual(expired_link.status_code, 400)
         self.assertFalse(Membership.objects.filter(group=self.group, user=self.outsider, is_active=True).exists())
 
+    def test_generating_new_invite_clears_stale_expired_hashes(self):
+        self.client.post(f"/api/groups/{self.group.id}/invite/", {}, format="json")
+        self.group.refresh_from_db()
+        self.group.invite_expires_at = timezone.now() - timedelta(seconds=1)
+        self.group.invite_token_hash = "stale-token"
+        self.group.invite_code_hash = "stale-code"
+        self.group.save(update_fields=["invite_expires_at", "invite_token_hash", "invite_code_hash"])
+
+        response = self.client.post(f"/api/groups/{self.group.id}/invite/", {}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.group.refresh_from_db()
+        self.assertNotEqual(self.group.invite_token_hash, "stale-token")
+        self.assertNotEqual(self.group.invite_code_hash, "stale-code")
+
     def test_invite_code_collision_retries_with_an_unused_code(self):
         second_group_response = self.client.post("/api/groups/", {"name": "Second group"}, format="json")
         self.assertEqual(second_group_response.status_code, 201, second_group_response.data)

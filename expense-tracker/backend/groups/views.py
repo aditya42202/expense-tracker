@@ -289,8 +289,10 @@ class GroupInviteView(APIView):
         group = get_object_or_404(Group, pk=group_id)
         require_admin(group_membership(group, request.user))
         now = timezone.now()
-        Group.objects.filter(invite_expires_at__lte=now).exclude(invite_code_hash__isnull=True).update(
+        Group.objects.filter(invite_expires_at__lte=now).update(
+            invite_token_hash="",
             invite_code_hash=None,
+            invite_expires_at=None,
         )
         for _ in range(10):
             token = secrets.token_urlsafe(32)
