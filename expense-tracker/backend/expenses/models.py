@@ -237,6 +237,7 @@ class AIInsight(models.Model):
         ("assistant", "Financial assistant"),
         ("report", "Monthly report"),
         ("categorization", "Expense categorization"),
+        ("group_insights", "Group financial insights"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ai_insights")

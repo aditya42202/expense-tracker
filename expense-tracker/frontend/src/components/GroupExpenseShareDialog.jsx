@@ -99,6 +99,8 @@ export default function GroupExpenseShareDialog({ expense, money }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [editedMessage, setEditedMessage] = useState(null);
+  const [confirmed, setConfirmed] = useState(false);
 
   const people = expense.participant_details || [];
   const paidBy = people.filter((person) => Number(person.paid) > 0).map((person) => person.name).join(', ') || t('Not specified');
@@ -131,9 +133,11 @@ export default function GroupExpenseShareDialog({ expense, money }) {
     '',
     'Shared via MoneyMind.',
   ].join('\n');
-  const selectedMessage = `${messageType === 'expense' ? expenseMessage : settlementMessage}${note.trim() ? `\n\n📝 ${t('Note')}: ${note.trim()}` : ''}`;
+  const messageTemplate = `${messageType === 'expense' ? expenseMessage : settlementMessage}${note.trim() ? `\n\n📝 ${t('Note')}: ${note.trim()}` : ''}`;
+  const selectedMessage = editedMessage ?? messageTemplate;
 
   const copyMessage = async () => {
+    if (!confirmed) return;
     try {
       await navigator.clipboard.writeText(selectedMessage);
       setError('');
@@ -145,6 +149,7 @@ export default function GroupExpenseShareDialog({ expense, money }) {
   };
 
   const shareReceipt = async () => {
+    if (!confirmed) return;
     try {
       const receiptName = `${expense.title || 'group-expense'}-receipt.png`.replace(/[^\w.-]+/g, '-');
       const receipt = await createReceiptImage(expense, people, money, date, paidBy);
@@ -172,6 +177,7 @@ export default function GroupExpenseShareDialog({ expense, money }) {
   };
 
   const shareToGroup = async () => {
+    if (!confirmed) return;
     try {
       if (navigator.share) {
         await navigator.share({ title: expense.title, text: selectedMessage });
@@ -187,11 +193,25 @@ export default function GroupExpenseShareDialog({ expense, money }) {
     }
   };
 
+  const updateMessageType = (type) => {
+    setMessageType(type);
+    setEditedMessage(null);
+    setConfirmed(false);
+    setStatus('');
+    setError('');
+  };
+
+  const updateNote = (value) => {
+    setNote(value);
+    setEditedMessage(null);
+    setConfirmed(false);
+  };
+
   return (
     <>
       <button
         type="button"
-        onClick={() => { setOpen(true); setStatus(''); setError(''); }}
+        onClick={() => { setOpen(true); setStatus(''); setError(''); setEditedMessage(null); setConfirmed(false); }}
         className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#168653] px-3 py-2 text-sm font-semibold text-white hover:bg-[#116d43]"
       >
         <MessageCircle className="h-4 w-4" />
@@ -229,10 +249,10 @@ export default function GroupExpenseShareDialog({ expense, money }) {
 
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
               <div className="grid grid-cols-2 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-[#1b2029]">
-                <button type="button" onClick={() => { setMessageType('expense'); setStatus(''); setError(''); }} aria-pressed={messageType === 'expense'} className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-2 text-xs font-semibold sm:text-sm ${messageType === 'expense' ? 'bg-violet-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300'}`}>
+                <button type="button" onClick={() => updateMessageType('expense')} aria-pressed={messageType === 'expense'} className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-2 text-xs font-semibold sm:text-sm ${messageType === 'expense' ? 'bg-violet-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300'}`}>
                   <Clipboard className="h-4 w-4" />{t('Expense Message')}
                 </button>
-                <button type="button" onClick={() => { setMessageType('settlement'); setStatus(''); setError(''); }} aria-pressed={messageType === 'settlement'} className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-2 text-xs font-semibold sm:text-sm ${messageType === 'settlement' ? 'bg-violet-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300'}`}>
+                <button type="button" onClick={() => updateMessageType('settlement')} aria-pressed={messageType === 'settlement'} className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-2 text-xs font-semibold sm:text-sm ${messageType === 'settlement' ? 'bg-violet-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-300'}`}>
                   <ArrowRightLeft className="h-4 w-4" />{t('Settlement Message')}
                 </button>
               </div>
@@ -275,10 +295,10 @@ export default function GroupExpenseShareDialog({ expense, money }) {
               </section>
 
               <div className="grid grid-cols-3 gap-2">
-                <button type="button" onClick={copyMessage} className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
+                <button type="button" disabled={!confirmed} onClick={copyMessage} className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
                   <Clipboard className="h-5 w-5 text-violet-600" />{t('Copy Message')}
                 </button>
-                <button type="button" onClick={shareReceipt} className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
+                <button type="button" disabled={!confirmed} onClick={shareReceipt} className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
                   <FileImage className="h-5 w-5 text-emerald-600" />{t('Share Receipt')}
                 </button>
                 <button type="button" onClick={() => setNoteOpen((current) => !current)} aria-expanded={noteOpen} className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
@@ -288,18 +308,26 @@ export default function GroupExpenseShareDialog({ expense, money }) {
 
               {noteOpen && <label className="block">
                 <span className="sr-only">{t('Add Note')}</span>
-                <textarea value={note} onChange={(event) => setNote(event.target.value)} rows="2" placeholder={t('Write a note to include with the message')} className="w-full resize-y rounded-xl border border-slate-300 bg-white p-3 text-sm dark:border-slate-700 dark:bg-[#1b2029]" />
+                <textarea value={note} onChange={(event) => updateNote(event.target.value)} rows="2" placeholder={t('Write a note to include with the message')} className="w-full resize-y rounded-xl border border-slate-300 bg-white p-3 text-sm dark:border-slate-700 dark:bg-[#1b2029]" />
               </label>}
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">{t('Edit message before sharing')}</span>
+                <textarea value={selectedMessage} onChange={(event) => { setEditedMessage(event.target.value); setConfirmed(false); }} rows="8" maxLength="4000" className="w-full resize-y rounded-xl border border-slate-300 bg-white p-3 text-sm dark:border-slate-700 dark:bg-[#1b2029]" />
+              </label>
+              <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                <input type="checkbox" className="mt-0.5" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+                <span>{t('I reviewed this message and confirm that I want to share its financial details.')}</span>
+              </label>
               {(status || error) && <p role={error ? 'alert' : 'status'} className={`text-xs ${error ? 'text-rose-700 dark:text-rose-300' : 'text-emerald-700 dark:text-emerald-300'}`}>{error || status}</p>}
             </div>
 
             <footer className="border-t border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-[#171c25]">
               <p className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold"><MessageCircle className="h-4 w-4 text-emerald-600" />{t('Share Via WhatsApp')}</p>
               <div className="grid grid-cols-2 gap-2">
-                <a href={`https://wa.me/?text=${encodeURIComponent(selectedMessage)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#0b9a43] px-3 text-center text-xs font-bold text-white hover:bg-[#087c36] sm:text-sm">
+                <a href={confirmed ? `https://wa.me/?text=${encodeURIComponent(selectedMessage)}` : undefined} target="_blank" rel="noreferrer" aria-disabled={!confirmed} tabIndex={confirmed ? 0 : -1} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#0b9a43] px-3 text-center text-xs font-bold text-white hover:bg-[#087c36] sm:text-sm ${confirmed ? '' : 'cursor-not-allowed opacity-50'}`}>
                   <MessageCircle className="h-4 w-4" />{t('Share on WhatsApp')}
                 </a>
-                <button type="button" onClick={shareToGroup} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-600 px-3 text-center text-xs font-bold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950 sm:text-sm">
+                <button type="button" disabled={!confirmed} onClick={shareToGroup} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-600 px-3 text-center text-xs font-bold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-400 dark:hover:bg-emerald-950 sm:text-sm">
                   <Users className="h-4 w-4" />{t('Share to Group')}
                 </button>
               </div>

@@ -26,6 +26,9 @@ export default function GroupsPage() {
   const [balances, setBalances] = useState({ balances: [], suggested_transfers: [] });
   const [settlements, setSettlements] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [aiConsentGroupId, setAiConsentGroupId] = useState('');
+  const [aiInsight, setAiInsight] = useState({ groupId: '', content: '' });
+  const [aiLoading, setAiLoading] = useState(false);
   const [sharePreview, setSharePreview] = useState('');
   const [olderBefore, setOlderBefore] = useState(null);
   const [messageText, setMessageText] = useState('');
@@ -272,6 +275,20 @@ export default function GroupsPage() {
     }
   };
 
+  const generateGroupInsights = async () => {
+    if (aiConsentGroupId !== groupId || aiLoading) return;
+    setAiLoading(true);
+    setError('');
+    try {
+      const { data } = await api.post(`/groups/${groupId}/ai-insights/`, { consent: true });
+      setAiInsight({ groupId, content: data.content });
+    } catch (insightError) {
+      setError(displayError(insightError, 'Unable to generate group insights.'));
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const sendMessage = (event) => {
     event.preventDefault();
     const text = messageText.trim();
@@ -355,6 +372,21 @@ export default function GroupsPage() {
               </div>
               {inviteUrl && <p className="break-all text-xs text-slate-500 sm:col-span-2">Invite expires in 7 days: {inviteUrl}</p>}
             </div>
+          </section>
+
+          <section className="space-y-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5 shadow-sm">
+            <div>
+              <h2 className="font-semibold text-slate-950">AI group insights</h2>
+              <p className="mt-1 text-sm text-slate-600">Analyze this group's spending, member contributions, categories, and current balances.</p>
+            </div>
+            <label className="flex items-start gap-2 text-sm text-slate-700">
+              <input type="checkbox" className="mt-1" checked={aiConsentGroupId === groupId} onChange={(event) => setAiConsentGroupId(event.target.checked ? groupId : '')} />
+              <span>I agree to send this group's financial summary to the configured AI provider.</span>
+            </label>
+            <button type="button" disabled={aiConsentGroupId !== groupId || aiLoading} onClick={generateGroupInsights} className="rounded-xl bg-indigo-700 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+              {aiLoading ? 'Generating insights...' : 'Generate group insights'}
+            </button>
+            {aiInsight.groupId === groupId && aiInsight.content && <p className="whitespace-pre-wrap rounded-xl bg-white p-4 text-sm leading-6 text-slate-800">{aiInsight.content}</p>}
           </section>
 
           <div className="grid gap-6 xl:grid-cols-2">

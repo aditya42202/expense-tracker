@@ -1,12 +1,15 @@
 from typing import Any, Protocol, cast
+from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
 from django.test import TransactionTestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import User
 from config.asgi import application
+from expenses.models import AIInsight
 from .models import ChatMessage, ExpenseShare, Group, Membership, SharedExpense
 
 
@@ -210,3 +213,38 @@ class GroupAPITests(TransactionTestCase):
         connected, close_code = async_to_sync(reuse_ticket)()
         self.assertFalse(connected)
         self.assertEqual(close_code, 4403)
+
+    @patch("expenses.ai_views._request_ai", return_value="Food spending is the largest category.")
+    def test_group_ai_insights_use_authorized_group_data(self, request_ai):
+        created = self.client.post(f"/api/groups/{self.group.id}/expenses/", {
+            "title": "Dinner", "amount": "120.00", "date": timezone.localdate().isoformat(),
+            "category": "Food", "split_type": "equal",
+        }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+
+        response = self.client.post(
+            f"/api/groups/{self.group.id}/ai-insights/", {"consent": True}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["content"], "Food spending is the largest category.")
+        financial_data = request_ai.call_args.args[1]["group_financial_data"]
+        self.assertEqual(financial_data["current_month_expenses"], "120.00")
+        self.assertEqual(financial_data["category_totals"], [{"category": "Food", "total": "120.00", "count": 1}])
+        self.assertEqual(
+            AIInsight.objects.filter(user=self.owner, feature="group_insights", content=response.data["content"]).count(),
+            1,
+        )
+
+    @patch("expenses.ai_views._request_ai")
+    def test_group_ai_insights_require_consent_and_group_membership(self, request_ai):
+        missing_consent = self.client.post(f"/api/groups/{self.group.id}/ai-insights/", {}, format="json")
+        self.assertEqual(missing_consent.status_code, 400)
+        request_ai.assert_not_called()
+
+        self.client.force_authenticate(self.outsider)
+        forbidden = self.client.post(
+            f"/api/groups/{self.group.id}/ai-insights/", {"consent": True}, format="json",
+        )
+        self.assertEqual(forbidden.status_code, 404)
+        request_ai.assert_not_called()

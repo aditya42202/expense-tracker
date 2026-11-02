@@ -60,10 +60,10 @@ All private endpoints require `Authorization: Bearer <access-token>`. Sign-in re
 - Shared group expenses: `GET/POST /api/groups/{id}/expenses/`, `GET/PATCH/DELETE /api/groups/{id}/expenses/{expense_id}/`; request shares use `split_type` (`equal`, `custom`, or `percentage`), `shares` with membership IDs and corresponding amounts/percentages when not equal, plus payer `payments` that must total the expense amount
 - Group balances and settlements: `GET /api/groups/{id}/balances/`, `GET/POST /api/groups/{id}/settlements/`, and `POST /api/groups/{id}/settlements/{settlement_id}/settle/`
 - Group chat: `GET /api/groups/{id}/chat/?limit=50&before={message_id}` (older pages), `POST /api/groups/{id}/chat/read/`, and `POST /api/groups/{id}/chat/ticket/` to obtain a 60-second, one-use WebSocket ticket. Connect to `/ws/groups/{id}/chat/?ticket={ticket}`; never use the access JWT in the WebSocket URL
-- WhatsApp sharing: persisted group-expense cards offer an editable message preview with group, amount, payer, shares, and date; opening the WhatsApp link only pre-fills the message and never sends it automatically
+- WhatsApp sharing: persisted group-expense cards offer an editable message preview with group, amount, payer, shares, and date; sharing, copying, or attaching a receipt requires explicit confirmation. Opening the WhatsApp link only pre-fills the message and never sends it automatically
 - Income: `GET/POST /api/income/`, `GET/PUT/PATCH/DELETE /api/income/{id}/`
 - Savings goals: `GET/POST /api/goals/`, standard detail update/delete routes, and `POST /api/goals/{id}/add-money/`
-- AI features: `POST /api/ai/insights/`, `/api/ai/assistant/`, `/api/ai/report/`, and `/api/ai/categorize/`
+- AI features: `POST /api/ai/insights/`, `/api/ai/assistant/`, `/api/ai/report/`, and `/api/ai/categorize/`; group members can request authorized, group-scoped insights through `POST /api/groups/{id}/ai-insights/`
 - Categories: `GET/POST /api/categories/`, standard detail update/delete routes
 - Dashboard: `GET /api/dashboard/`, `GET /api/dashboard/reports/`, `/api/dashboard/monthly/?months=12`, `/api/dashboard/categories/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - Health: public `GET /api/health/` returns `{"status":"ok"}`
@@ -91,7 +91,7 @@ Set backend environment variables in the host dashboard or secret manager:
 - `OPENAI_API_KEY`: optional server-side key for the MoneyMind AI features; add it as a secret in Render after creating the Blueprint, and never expose it as a `VITE_*` variable
 - `OPENAI_MODEL`: optional OpenAI chat-completions model name (defaults to `gpt-4o-mini`)
 
-AI requests require a separate in-app consent confirmation before the user's financial summary or expense description is sent to OpenAI. Without `OPENAI_API_KEY`, the AI pages remain visible and return a clear configuration message instead of generated or sample insights. AI responses are educational and may be incomplete.
+AI requests require a separate in-app consent confirmation before the user's financial summary, group financial summary, or expense description is sent to OpenAI. Group insights include group expenses, contributions, balances, and pending settlements, but do not infer a group budget because none is currently configured. Without `OPENAI_API_KEY`, the AI pages remain visible and return a clear configuration message instead of generated or sample insights. AI responses are educational and may be incomplete.
 
 Install `backend/requirements.txt`, then run `python manage.py migrate` and `python manage.py collectstatic --noinput`. The ASGI app (configured at `config.asgi:application`) must serve production HTTP and WebSockets, for example `daphne -b 0.0.0.0 -p $PORT config.asgi:application` from `backend/`; a WSGI-only server does not serve group chat. Set `REDIS_URL` to a persistent Redis/Valkey endpoint for the production Channels layer. `DEBUG=False` without `REDIS_URL` is rejected at startup. The settings enable PostgreSQL SSL in production, HTTPS redirects, secure session/CSRF cookies, proxy HTTPS recognition, and WhiteNoise static serving. Terminate HTTPS at the platform or reverse proxy.
 

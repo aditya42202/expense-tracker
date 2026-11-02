@@ -57,6 +57,7 @@ class SharedExpense(models.Model):
 
     class Meta:
         ordering = ["-date", "-created_at"]
+        indexes = [models.Index(fields=["group", "date"], name="groups_group_date_idx")]
 
 
 class ExpenseShare(models.Model):
@@ -100,6 +101,7 @@ class Settlement(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [models.Index(fields=["group", "is_settled"], name="groups_settled_status_idx")]
 
 
 class ChatMessage(models.Model):
