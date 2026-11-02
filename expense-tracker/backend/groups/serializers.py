@@ -40,10 +40,18 @@ class GroupSerializer(serializers.ModelSerializer):
 class ChatMessageSerializer(serializers.ModelSerializer):
     sender_id = serializers.IntegerField(read_only=True)
     sender_name = serializers.CharField(source="sender.name", read_only=True)
+    expense_id = serializers.IntegerField(read_only=True)
+    expense_title = serializers.CharField(source="expense.title", read_only=True, allow_null=True)
+    expense_amount = serializers.DecimalField(
+        source="expense.amount", max_digits=12, decimal_places=2, read_only=True, allow_null=True,
+    )
 
     class Meta:
         model = ChatMessage
-        fields = ["id", "sender_id", "sender_name", "text", "created_at"]
+        fields = [
+            "id", "sender_id", "sender_name", "text", "message_type",
+            "expense_id", "expense_title", "expense_amount", "created_at", "updated_at",
+        ]
 
 
 class SettlementSerializer(serializers.ModelSerializer):

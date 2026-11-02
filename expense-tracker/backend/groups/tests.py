@@ -198,6 +198,34 @@ class GroupAPITests(TransactionTestCase):
         self.assertEqual(group_data["unread_count"], 1)
         self.assertEqual(self.client.post(f"/api/groups/{self.group.id}/chat/read/").status_code, 200)
 
+    def test_expense_chat_message_is_structured_and_idempotent(self):
+        created = self.client.post(f"/api/groups/{self.group.id}/expenses/", {
+            "title": "Dinner", "amount": "30.00", "date": timezone.localdate().isoformat(),
+            "split_type": "equal",
+        }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+
+        url = f"/api/groups/{self.group.id}/chat/"
+        first = self.client.post(url, {
+            "message_type": "EXPENSE", "expense_id": created.data["id"],
+        }, format="json")
+        retry = self.client.post(url, {
+            "message_type": "EXPENSE", "expense_id": created.data["id"],
+        }, format="json")
+
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(retry.status_code, 200, retry.data)
+        self.assertEqual(retry.data["id"], first.data["id"])
+        self.assertEqual(first.data["message_type"], "EXPENSE")
+        self.assertEqual(first.data["expense_title"], "Dinner")
+        self.assertEqual(ChatMessage.objects.filter(group=self.group, expense_id=created.data["id"]).count(), 1)
+        detail = self.client.get(f"/api/groups/{self.group.id}/expenses/{created.data['id']}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.data["title"], "Dinner")
+
+        self.client.force_authenticate(self.outsider)
+        self.assertEqual(self.client.get(f"/api/groups/{self.group.id}/expenses/{created.data['id']}/").status_code, 404)
+
     def test_six_digit_invitation_code_is_hashed_and_joins_group(self):
         invite = self.client.post(f"/api/groups/{self.group.id}/invite/", {}, format="json")
         self.assertEqual(invite.status_code, 200)

@@ -380,6 +380,10 @@ class GroupExpenseDetailView(APIView):
         group_membership(group, request.user)
         return get_object_or_404(SharedExpense, group=group, pk=expense_id)
 
+    def get(self, request, group_id, expense_id):
+        expense = self.get_object(request, group_id, expense_id)
+        return Response(public_expense(expense))
+
     def patch(self, request, group_id, expense_id):
         expense = self.get_object(request, group_id, expense_id)
         payload, amount, shares, payments = validate_expense_payload(expense.group, request.user, request.data, expense)
@@ -461,36 +465,39 @@ class GroupSettlementsView(APIView):
                          "suggested_transfers": suggested_transfers(members, balances)})
 
     def post(self, request, group_id):
-        group = get_object_or_404(Group, pk=group_id)
-        group_membership(group, request.user)
-        try:
-            from_member = Membership.objects.get(group=group, pk=request.data["from_membership_id"], is_active=True)
-            to_member = Membership.objects.get(group=group, pk=request.data["to_membership_id"], is_active=True)
-            amount = money(request.data["amount"])
-        except (KeyError, TypeError, ValueError, InvalidOperation, Membership.DoesNotExist) as exc:
-            raise ValidationError("Provide valid group members and an amount.") from exc
-        if from_member.id == to_member.id or amount <= 0 or amount > MAX_AMOUNT:
-            raise ValidationError("A settlement must be positive and between two different members.")
-        if group.settlements.filter(
-            from_membership=from_member,
-            to_membership=to_member,
-            is_settled=False,
-        ).exists():
-            raise ValidationError("A pending settlement already exists for these members.")
-        members, balances = group_net_balances(group)
-        expected = next(
-            (
-                Decimal(transfer["amount"])
-                for transfer in suggested_transfers(members, balances)
-                if transfer["from_membership_id"] == from_member.id
-                and transfer["to_membership_id"] == to_member.id
-            ),
-            Decimal("0"),
-        )
-        if amount != expected:
-            raise ValidationError({"amount": "Settlement amount must match the current server-calculated balance."})
-        record = Settlement.objects.create(group=group, from_membership=from_member, to_membership=to_member,
-                                           amount=amount, created_by=request.user)
+        with transaction.atomic():
+            group = get_object_or_404(Group.objects.select_for_update(), pk=group_id)
+            group_membership(group, request.user)
+            try:
+                from_member = Membership.objects.get(group=group, pk=request.data["from_membership_id"], is_active=True)
+                to_member = Membership.objects.get(group=group, pk=request.data["to_membership_id"], is_active=True)
+                amount = money(request.data["amount"])
+            except (KeyError, TypeError, ValueError, InvalidOperation, Membership.DoesNotExist) as exc:
+                raise ValidationError("Provide valid group members and an amount.") from exc
+            if from_member.id == to_member.id or amount <= 0 or amount > MAX_AMOUNT:
+                raise ValidationError("A settlement must be positive and between two different members.")
+            if group.settlements.filter(
+                from_membership=from_member,
+                to_membership=to_member,
+                is_settled=False,
+            ).exists():
+                raise ValidationError("A pending settlement already exists for these members.")
+            members, balances = group_net_balances(group)
+            expected = next(
+                (
+                    Decimal(transfer["amount"])
+                    for transfer in suggested_transfers(members, balances)
+                    if transfer["from_membership_id"] == from_member.id
+                    and transfer["to_membership_id"] == to_member.id
+                ),
+                Decimal("0"),
+            )
+            if amount != expected:
+                raise ValidationError({"amount": "Settlement amount must match the current server-calculated balance."})
+            record = Settlement.objects.create(
+                group=group, from_membership=from_member, to_membership=to_member,
+                amount=amount, created_by=request.user,
+            )
         return Response(SettlementSerializer(record).data, status=status.HTTP_201_CREATED)
 
 
@@ -534,10 +541,30 @@ class GroupChatView(APIView):
     def post(self, request, group_id):
         group = get_object_or_404(Group, pk=group_id)
         group_membership(group, request.user)
-        text = str(request.data.get("text", "")).strip()
-        if not text or len(text) > 2000:
-            raise ValidationError({"text": "Message must contain 1–2000 characters."})
-        message = ChatMessage.objects.create(group=group, sender=request.user, text=text)
+        message_type = str(request.data.get("message_type", "TEXT")).upper()
+        if message_type == "EXPENSE":
+            try:
+                expense_id = int(request.data["expense_id"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValidationError({"expense_id": "Provide a valid group expense ID."}) from exc
+            expense = get_object_or_404(SharedExpense, group=group, pk=expense_id)
+            text = f"Expense shared: {expense.title}"
+            message, created = ChatMessage.objects.get_or_create(
+                group=group,
+                expense=expense,
+                message_type="EXPENSE",
+                defaults={"sender": request.user, "text": text},
+            )
+        elif message_type == "TEXT":
+            text = str(request.data.get("text", "")).strip()
+            if not text or len(text) > 2000:
+                raise ValidationError({"text": "Message must contain 1–2000 characters."})
+            message = ChatMessage.objects.create(
+                group=group, sender=request.user, text=text, message_type="TEXT",
+            )
+            created = True
+        else:
+            raise ValidationError({"message_type": "Choose TEXT or EXPENSE."})
         serialized = ChatMessageSerializer(message).data
         channel_layer = get_channel_layer()
         if channel_layer is None:
@@ -556,14 +583,10 @@ class GroupChatView(APIView):
             delivery_status = "polling"
         return Response(
             {
-                "id": message.pk,
-                "sender_id": request.user.pk,
-                "sender_name": request.user.name,
-                "text": message.text,
-                "created_at": message.created_at,
+                **serialized,
                 "delivery_status": delivery_status,
             },
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
 

@@ -53,6 +53,7 @@ export default function GroupsPage() {
   const [aiInsight, setAiInsight] = useState({ groupId: '', content: '' });
   const [aiLoading, setAiLoading] = useState(false);
   const [sharePreview, setSharePreview] = useState('');
+  const [chatExpenseDetails, setChatExpenseDetails] = useState(null);
   const [olderBefore, setOlderBefore] = useState(null);
   const [messageText, setMessageText] = useState('');
   const [connection, setConnection] = useState('connecting');
@@ -66,12 +67,18 @@ export default function GroupsPage() {
   const [chatError, setChatError] = useState('');
   const [notice, setNotice] = useState('');
   const socketRef = useRef(null);
+  const chatEndRef = useRef(null);
   const inviteRequestsRef = useRef(new Map());
   const selectedGroup = useMemo(() => groups.find((group) => String(group.id) === String(groupId)), [groups, groupId]);
   const members = selectedGroup?.members || [];
   const myMembership = members.find((member) => member.user_id === user?.id);
   const money = useMemo(() => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'INR' }), []);
   const joiningInvite = Boolean(inviteCodePath || inviteToken);
+  const lastMessageId = messages[messages.length - 1]?.id;
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [lastMessageId]);
 
   const loadGroups = useCallback(async () => {
     const { data } = await api.get('/groups/');
@@ -432,6 +439,29 @@ export default function GroupsPage() {
     ].join('\n'));
   };
 
+  const shareExpenseToChat = async (expense) => {
+    try {
+      const { data, status: responseStatus } = await api.post(`/groups/${groupId}/chat/`, {
+        message_type: 'EXPENSE',
+        expense_id: expense.id,
+      });
+      setMessages((current) => mergeMessages(current, [data]));
+      setNotice(responseStatus === 200 ? 'This expense is already shared in the group chat.' : 'Expense shared in the group chat.');
+      setError('');
+    } catch (shareError) {
+      setError(displayError(shareError, 'Unable to share this expense in the group chat.'));
+    }
+  };
+
+  const openChatExpense = async (expenseId) => {
+    try {
+      const { data } = await api.get(`/groups/${groupId}/expenses/${expenseId}/`);
+      setChatExpenseDetails(data);
+    } catch (detailError) {
+      setError(displayError(detailError, 'Unable to load this shared expense.'));
+    }
+  };
+
   const createSettlement = async (transfer) => {
     try {
       await api.post(`/groups/${groupId}/settlements/`, {
@@ -606,7 +636,7 @@ export default function GroupsPage() {
               {expenseForm.split_type !== 'equal' && <div className="space-y-2 rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold text-slate-600">{expenseForm.split_type === 'custom' ? 'Share amounts (must add to total)' : 'Shares (must total 100%)'}</p>{members.map((member) => <label key={member.id} className="flex items-center justify-between gap-3 text-sm"><span>{member.name}</span><input type="number" step={expenseForm.split_type === 'custom' ? '0.01' : '0.001'} min="0" value={(expenseForm.split_type === 'custom' ? customShares : percentageShares)[member.id] || ''} onChange={(event) => updateSplitInput(member.id, event.target.value)} placeholder={expenseForm.split_type === 'custom' ? '₹ amount' : '%'} className="w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-right" /></label>)}</div>}
               <details className="rounded-xl bg-slate-50 p-3"><summary className="cursor-pointer text-sm font-semibold">Who paid? (defaults to you)</summary><div className="mt-3 space-y-2">{members.map((member) => <label key={member.id} className="flex items-center justify-between gap-3 text-sm"><span>{member.name}</span><input type="number" step="0.01" min="0" value={payerAmounts[member.id] || ''} onChange={(event) => setPayerAmounts({ ...payerAmounts, [member.id]: event.target.value })} placeholder="₹ paid" className="w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-right" /></label>)}</div></details>
               <button className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 font-semibold text-white hover:bg-indigo-700">Save expense</button>
-              <div className="space-y-2">{expenses.map((expense) => <article key={expense.id} className="flex items-start justify-between gap-3 rounded-xl border border-slate-100 p-3"><div className="min-w-0"><p className="truncate font-medium">{expense.title}</p><p className="text-xs text-slate-500">{expense.date} · {expense.category || 'Shared'} · {expense.split_type}</p><p className="mt-1 text-xs text-slate-500">{expense.shares.map((share) => `${share.name}: ${money.format(Number(share.amount))}`).join(' · ')}</p></div><div className="shrink-0 text-right"><p className="font-semibold">{money.format(Number(expense.amount))}</p><div className="mt-1 flex justify-end gap-3"><button onClick={() => previewExpenseShare(expense)} type="button" className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700"><Share2 className="h-3.5 w-3.5" /> WhatsApp</button><button onClick={() => deleteExpense(expense.id)} type="button" className="text-xs text-rose-600">Delete</button></div></div></article>)}</div>
+              <div className="space-y-2">{expenses.map((expense) => <article id={`group-expense-${expense.id}`} key={expense.id} className="flex items-start justify-between gap-3 rounded-xl border border-slate-100 p-3"><div className="min-w-0"><p className="truncate font-medium">{expense.title}</p><p className="text-xs text-slate-500">{expense.date} · {expense.category || 'Shared'} · {expense.split_type}</p><p className="mt-1 text-xs text-slate-500">{expense.shares.map((share) => `${share.name}: ${money.format(Number(share.amount))}`).join(' · ')}</p></div><div className="shrink-0 text-right"><p className="font-semibold">{money.format(Number(expense.amount))}</p><div className="mt-1 flex justify-end gap-3"><button onClick={() => shareExpenseToChat(expense)} type="button" className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700"><MessageCircle className="h-3.5 w-3.5" /> Share to chat</button><button onClick={() => previewExpenseShare(expense)} type="button" className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700"><Share2 className="h-3.5 w-3.5" /> WhatsApp</button><button onClick={() => deleteExpense(expense.id)} type="button" className="text-xs text-rose-600">Delete</button></div></div></article>)}</div>
             </form>
 
             <section className="space-y-5">
@@ -622,9 +652,10 @@ export default function GroupsPage() {
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
                   {olderBefore && <button onClick={loadOlderMessages} className="w-full rounded-lg bg-slate-50 py-2 text-xs font-medium text-indigo-700">Load older messages</button>}
                   {!messages.length && <p className="py-12 text-center text-sm text-slate-500">Start the conversation.</p>}
-                  {messages.map((message) => <div key={message.id} className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm ${message.sender_id === user?.id ? 'ml-auto bg-indigo-600 text-white' : 'bg-slate-100 text-slate-800'}`}><p className="mb-1 text-xs font-semibold opacity-75">{message.sender_name}</p><p className="whitespace-pre-wrap wrap-break-word">{message.text}</p><time className="mt-1 block text-right text-[10px] opacity-70">{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>)}
+                  {messages.map((message) => <div key={message.id} className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm ${message.sender_id === user?.id ? 'ml-auto bg-indigo-600 text-white' : 'bg-slate-100 text-slate-800'}`}><p className="mb-1 text-xs font-semibold opacity-75">{message.sender_name}</p>{message.message_type === 'EXPENSE' ? <div className="rounded-xl border border-current/15 bg-white/10 p-3"><p className="font-semibold">{message.expense_title || message.text}</p>{message.expense_amount && <p className="mt-1">{money.format(Number(message.expense_amount))}</p>}{message.expense_id && <button type="button" onClick={() => openChatExpense(message.expense_id)} className="mt-2 rounded-lg bg-white/20 px-3 py-1.5 text-xs font-semibold underline">View expense</button>}</div> : <p className="whitespace-pre-wrap wrap-break-word">{message.text}</p>}<time className="mt-1 block text-right text-[10px] opacity-70">{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>)}
+                  <div ref={chatEndRef} />
                 </div>
-                <form onSubmit={sendMessage} className="flex gap-2 border-t border-slate-100 p-3"><input maxLength={2000} value={messageText} onChange={(event) => setMessageText(event.target.value)} placeholder="Write a message…" className="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2" /><button disabled={connection !== 'connected' || !messageText.trim()} aria-label="Send message" className="rounded-xl bg-indigo-600 px-4 text-white disabled:opacity-40"><Send className="h-4 w-4" /></button></form>
+                <form onSubmit={sendMessage} className="flex gap-2 border-t border-slate-100 p-3"><textarea maxLength={2000} rows={1} value={messageText} onChange={(event) => setMessageText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(event); } }} placeholder="Write a message…" className="min-w-0 flex-1 resize-y rounded-xl border border-slate-300 px-3 py-2" /><button disabled={!messageText.trim()} aria-label="Send message" className="rounded-xl bg-indigo-600 px-4 text-white disabled:opacity-40"><Send className="h-4 w-4" /></button></form>
               </section>
             </section>
           </div>
@@ -639,6 +670,22 @@ export default function GroupsPage() {
             <button type="button" onClick={() => setSharePreview('')} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium">Cancel</button>
             <a href={`https://wa.me/?text=${encodeURIComponent(sharePreview)}`} target="_blank" rel="noopener noreferrer" onClick={() => setSharePreview('')} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Open WhatsApp</a>
           </div>
+        </section>
+      </div>}
+      {chatExpenseDetails && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={(event) => {
+        if (event.target === event.currentTarget) setChatExpenseDetails(null);
+      }}>
+        <section role="dialog" aria-modal="true" aria-labelledby="group-chat-expense-title" className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <div><p className="text-sm text-slate-500">Shared group expense</p><h2 id="group-chat-expense-title" className="text-xl font-semibold">{chatExpenseDetails.title}</h2></div>
+            <button type="button" onClick={() => setChatExpenseDetails(null)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm">Close</button>
+          </div>
+          <p className="mt-3 text-lg font-semibold">{money.format(Number(chatExpenseDetails.amount))}</p>
+          <p className="text-sm text-slate-500">{chatExpenseDetails.date} · {chatExpenseDetails.category || 'Shared'}</p>
+          <h3 className="mt-5 text-sm font-semibold">Participant shares</h3>
+          <div className="mt-2 space-y-2">{chatExpenseDetails.shares.map((share) => <div key={share.membership_id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm"><span>{share.name}</span><span>{money.format(Number(share.amount))}</span></div>)}</div>
+          <h3 className="mt-5 text-sm font-semibold">Paid by</h3>
+          <div className="mt-2 space-y-2">{chatExpenseDetails.payments.map((payment) => <div key={payment.membership_id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm"><span>{payment.name}</span><span>{money.format(Number(payment.amount))}</span></div>)}</div>
         </section>
       </div>}
     </div>

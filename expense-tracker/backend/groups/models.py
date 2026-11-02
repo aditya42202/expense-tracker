@@ -108,13 +108,32 @@ class Settlement(models.Model):
 class ChatMessage(models.Model):
     id: int
 
+    MESSAGE_TYPE_CHOICES = [
+        ("TEXT", "Text"),
+        ("EXPENSE", "Expense"),
+        ("SETTLEMENT", "Settlement"),
+        ("SYSTEM", "System"),
+    ]
+
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="group_messages")
-    text = models.CharField(max_length=2000)
+    text = models.CharField(max_length=2000, blank=True)
+    message_type = models.CharField(max_length=12, choices=MESSAGE_TYPE_CHOICES, default="TEXT")
+    expense = models.ForeignKey(
+        SharedExpense, on_delete=models.SET_NULL, null=True, blank=True, related_name="chat_messages",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "expense", "message_type"],
+                condition=models.Q(message_type="EXPENSE"),
+                name="groups_unique_shared_expense_message",
+            ),
+        ]
 
 
 class WebSocketTicket(models.Model):
