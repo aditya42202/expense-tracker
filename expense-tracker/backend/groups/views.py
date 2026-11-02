@@ -550,7 +550,14 @@ class GroupChatView(APIView):
             )
             delivery_status = "polling"
         return Response(
-            {**serialized, "delivery_status": delivery_status},
+            {
+                "id": message.pk,
+                "sender_id": request.user.pk,
+                "sender_name": request.user.name,
+                "text": message.text,
+                "created_at": message.created_at,
+                "delivery_status": delivery_status,
+            },
             status=status.HTTP_201_CREATED,
         )
 
