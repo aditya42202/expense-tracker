@@ -152,6 +152,7 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_THROTTLE_RATES": {
         "ai": "20/hour",
+        "group_invite": "10/hour",
     },
 }
 

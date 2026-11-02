@@ -270,7 +270,7 @@ export default function GroupsPage() {
       const { data } = await api.post(`/groups/${groupId}/invite/`);
       const inviteUrl = new URL('/groups', window.location.origin);
       inviteUrl.searchParams.set('invite', data.token);
-      setInvite({ groupId, code: data.token, url: inviteUrl.toString() });
+      setInvite({ groupId, code: data.code, url: inviteUrl.toString() });
       setNotice('Invitation code and link created. They expire in 7 days.');
       setError('');
     } catch (inviteError) {
@@ -291,7 +291,7 @@ export default function GroupsPage() {
   const joinGroup = async (event) => {
     event.preventDefault();
     try {
-      const { data } = await api.post('/groups/join/', { token: joinToken });
+      const { data } = await api.post('/groups/join/', { code: joinToken });
       setJoinToken('');
       await loadGroups();
       setGroupId(String(data.id));
@@ -461,7 +461,8 @@ export default function GroupsPage() {
 
           <form onSubmit={joinGroup} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="font-semibold">Join with an invite</h2>
-            <input value={joinToken} onChange={(event) => setJoinToken(event.target.value)} placeholder="Paste invite token" className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+            <label htmlFor="group-invite-code" className="sr-only">Six-digit invitation code</label>
+            <input id="group-invite-code" type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={joinToken} onChange={(event) => setJoinToken(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="Enter 6-digit invite code" className="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono tracking-widest" />
             <button className="w-full rounded-xl border border-indigo-200 px-4 py-2 font-semibold text-indigo-700 hover:bg-indigo-50">Join group</button>
           </form>
         </aside>

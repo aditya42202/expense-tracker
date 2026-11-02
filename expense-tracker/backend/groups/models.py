@@ -15,6 +15,7 @@ class Group(models.Model):
     description = models.TextField(blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_groups")
     invite_token_hash = models.CharField(max_length=64, blank=True)
+    invite_code_hash = models.CharField(max_length=64, null=True, blank=True, unique=True)
     invite_expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

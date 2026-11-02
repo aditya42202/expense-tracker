@@ -1,9 +1,11 @@
 import hashlib
+import hmac
 import secrets
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 
-from django.db import transaction
+from django.conf import settings
+from django.db import IntegrityError, transaction
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.shortcuts import get_object_or_404
@@ -13,6 +15,7 @@ from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounts.models import User
@@ -236,22 +239,58 @@ class GroupInviteView(APIView):
     def post(self, request, group_id):
         group = get_object_or_404(Group, pk=group_id)
         require_admin(group_membership(group, request.user))
-        token = secrets.token_urlsafe(32)
-        group.invite_token_hash = hashlib.sha256(token.encode()).hexdigest()
-        group.invite_expires_at = timezone.now() + timedelta(days=7)
-        group.save(update_fields=["invite_token_hash", "invite_expires_at"])
-        return Response({"token": token, "expires_at": group.invite_expires_at})
+        now = timezone.now()
+        Group.objects.filter(invite_expires_at__lte=now).exclude(invite_code_hash__isnull=True).update(
+            invite_code_hash=None,
+        )
+        for _ in range(10):
+            token = secrets.token_urlsafe(32)
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            group.invite_token_hash = hashlib.sha256(token.encode()).hexdigest()
+            group.invite_code_hash = hmac.new(
+                str(settings.SECRET_KEY).encode(),
+                code.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+            group.invite_expires_at = now + timedelta(days=7)
+            try:
+                with transaction.atomic():
+                    group.save(update_fields=["invite_token_hash", "invite_code_hash", "invite_expires_at"])
+            except IntegrityError:
+                continue
+            return Response({"token": token, "code": code, "expires_at": group.invite_expires_at})
+        raise ValidationError({"invite": "Unable to generate a unique invitation code. Please try again."})
 
 
 class JoinGroupView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "group_invite"
 
     def post(self, request):
-        token = str(request.data.get("token", ""))
-        digest = hashlib.sha256(token.encode()).hexdigest()
-        group = Group.objects.filter(invite_token_hash=digest, invite_expires_at__gt=timezone.now()).first()
+        code = request.data.get("code")
+        token = str(request.data.get("token", "")).strip()
+        if code is not None or (len(token) == 6 and token.isascii() and token.isdigit()):
+            code = str(code if code is not None else token).strip()
+            if len(code) != 6 or not code.isascii() or not code.isdigit():
+                raise ValidationError({"code": "Enter a valid six-digit invitation code."})
+            digest = hmac.new(
+                str(settings.SECRET_KEY).encode(),
+                code.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+            group = Group.objects.filter(
+                invite_code_hash=digest,
+                invite_expires_at__gt=timezone.now(),
+            ).first()
+        else:
+            digest = hashlib.sha256(token.encode()).hexdigest()
+            group = Group.objects.filter(
+                invite_token_hash=digest,
+                invite_expires_at__gt=timezone.now(),
+            ).first()
         if not group:
-            raise ValidationError({"token": "This invite link is invalid or expired."})
+            raise ValidationError({"invite": "This invitation code or link is invalid or expired."})
         membership, created = Membership.objects.get_or_create(group=group, user=request.user, defaults={"is_active": True})
         if not created and not membership.is_active:
             membership.is_active = True

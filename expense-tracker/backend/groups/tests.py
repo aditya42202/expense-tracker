@@ -164,6 +164,8 @@ class GroupAPITests(TransactionTestCase):
     def test_invite_join_and_chat_history_unread_counts(self):
         invite = self.client.post(f"/api/groups/{self.group.id}/invite/", {}, format="json")
         self.assertEqual(invite.status_code, 200)
+        self.assertEqual(len(invite.data["code"]), 6)
+        self.assertTrue(invite.data["code"].isascii() and invite.data["code"].isdigit())
         self.client.force_authenticate(self.outsider)
         joined = self.client.post("/api/groups/join/", {"token": invite.data["token"]}, format="json")
         self.assertEqual(joined.status_code, 201)
@@ -180,6 +182,35 @@ class GroupAPITests(TransactionTestCase):
         group_data = self.client.get("/api/groups/").data[0]
         self.assertEqual(group_data["unread_count"], 1)
         self.assertEqual(self.client.post(f"/api/groups/{self.group.id}/chat/read/").status_code, 200)
+
+    def test_six_digit_invitation_code_is_hashed_and_joins_group(self):
+        invite = self.client.post(f"/api/groups/{self.group.id}/invite/", {}, format="json")
+        self.assertEqual(invite.status_code, 200)
+        self.group.refresh_from_db()
+        self.assertNotEqual(self.group.invite_code_hash, invite.data["code"])
+
+        self.client.force_authenticate(self.outsider)
+        joined = self.client.post("/api/groups/join/", {"code": invite.data["code"]}, format="json")
+        self.assertEqual(joined.status_code, 201, joined.data)
+        self.assertEqual(joined.data["id"], self.group.id)
+
+    def test_invalid_six_digit_invitation_code_is_rejected(self):
+        response = self.client.post("/api/groups/join/", {"code": "12a456"}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_invite_code_collision_retries_with_an_unused_code(self):
+        second_group_response = self.client.post("/api/groups/", {"name": "Second group"}, format="json")
+        self.assertEqual(second_group_response.status_code, 201, second_group_response.data)
+
+        with patch("groups.views.secrets.randbelow", side_effect=[123456, 123456, 654321]):
+            first_invite = self.client.post(f"/api/groups/{self.group.id}/invite/", {}, format="json")
+            second_invite = self.client.post(
+                f"/api/groups/{second_group_response.data['id']}/invite/", {}, format="json",
+            )
+
+        self.assertEqual(first_invite.data["code"], "123456")
+        self.assertEqual(second_invite.status_code, 200, second_invite.data)
+        self.assertEqual(second_invite.data["code"], "654321")
 
     def test_websocket_ticket_is_one_use_and_delivers_persisted_messages(self):
         ticket = self.client.post(f"/api/groups/{self.group.id}/chat/ticket/", {}, format="json").data["ticket"]
