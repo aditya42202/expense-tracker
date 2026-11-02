@@ -2,10 +2,8 @@ import hashlib
 import hmac
 import logging
 import secrets
-from collections.abc import Mapping
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
-from typing import Any, cast
 
 from django.conf import settings
 from django.db import DatabaseError, IntegrityError, transaction
@@ -539,18 +537,40 @@ class GroupChatView(APIView):
         group_membership(group, request.user)
         try:
             limit = min(max(int(request.query_params.get("limit", 50)), 1), 100)
-            before = int(request.query_params["before"]) if request.query_params.get("before") else None
+            before_value = request.query_params.get("before")
+            after_value = request.query_params.get("after")
+            before = int(before_value) if before_value else None
+            after = int(after_value) if after_value else None
         except (TypeError, ValueError) as exc:
-            raise ValidationError({"pagination": "before and limit must be integers."}) from exc
-        queryset = group.messages.select_related("sender")
+            raise ValidationError({"pagination": "before, after, and limit must be integers."}) from exc
+        if (before is not None and before < 1) or (after is not None and after < 1):
+            raise ValidationError({"pagination": "before and after must be positive message IDs."})
+        if before is not None and after is not None:
+            raise ValidationError({"pagination": "Use either before or after, not both."})
+
+        queryset = group.messages.select_related("sender", "expense")
+        next_before = None
+        next_after = None
         if before:
             queryset = queryset.filter(id__lt=before)
-        messages = list(queryset.order_by("-id")[:limit + 1])
-        has_more = len(messages) > limit
-        messages = messages[:limit]
-        messages.reverse()
+            messages = list(queryset.order_by("-id")[:limit + 1])
+            has_more = len(messages) > limit
+            messages = messages[:limit]
+            messages.reverse()
+            next_before = messages[0].id if messages and has_more else None
+        elif after is not None:
+            messages = list(queryset.filter(id__gt=after).order_by("id")[:limit + 1])
+            has_more = len(messages) > limit
+            messages = messages[:limit]
+            next_after = messages[-1].id if messages and has_more else None
+        else:
+            messages = list(queryset.order_by("-id")[:limit + 1])
+            has_more = len(messages) > limit
+            messages = messages[:limit]
+            messages.reverse()
+            next_before = messages[0].id if messages and has_more else None
         return Response({"results": ChatMessageSerializer(messages, many=True).data,
-                         "next_before": messages[0].id if messages and has_more else None})
+                         "next_before": next_before, "next_after": next_after, "has_more": has_more})
 
     def post(self, request, group_id):
         group = get_object_or_404(Group, pk=group_id)
@@ -570,16 +590,16 @@ class GroupChatView(APIView):
                 defaults={"sender": request.user, "text": text},
             )
         elif message_type == "TEXT":
-            text = str(request.data.get("text", "")).strip()
-            if not text or len(text) > 2000:
+            text = request.data.get("text", "")
+            if not isinstance(text, str) or not text.strip() or len(text.strip()) > 2000:
                 raise ValidationError({"text": "Message must contain 1–2000 characters."})
             message = ChatMessage.objects.create(
-                group=group, sender=request.user, text=text, message_type="TEXT",
+                group=group, sender=request.user, text=text.strip(), message_type="TEXT",
             )
             created = True
         else:
             raise ValidationError({"message_type": "Choose TEXT or EXPENSE."})
-        serialized = cast(Mapping[str, Any], ChatMessageSerializer(message).data)
+        serialized = ChatMessageSerializer(message).data
         return Response(
             serialized,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,

@@ -198,6 +198,47 @@ class GroupAPITests(TransactionTestCase):
         self.assertEqual(group_data["unread_count"], 1)
         self.assertEqual(self.client.post(f"/api/groups/{self.group.id}/chat/read/").status_code, 200)
 
+    def test_chat_members_can_poll_replies_and_only_read_their_group(self):
+        url = f"/api/groups/{self.group.id}/chat/"
+        self.assertEqual(self.client.post(url, {"text": "   "}, format="json").status_code, 400)
+        admin_message = self.client.post(url, {"text": "Dinner is ready"}, format="json")
+        self.assertEqual(admin_message.status_code, 201, admin_message.data)
+
+        self.client.force_authenticate(self.member)
+        member_history = self.client.get(url)
+        self.assertEqual(member_history.status_code, 200)
+        self.assertEqual(member_history.data["results"][0]["id"], admin_message.data["id"])
+        self.assertEqual(member_history.data["results"][0]["sender_name"], "Owner")
+
+        member_reply = self.client.post(url, {"text": "On my way"}, format="json")
+        self.assertEqual(member_reply.status_code, 201, member_reply.data)
+        self.client.force_authenticate(self.owner)
+        admin_followup = self.client.post(url, {"text": "See you soon"}, format="json")
+        self.assertEqual(admin_followup.status_code, 201, admin_followup.data)
+        incremental = self.client.get(f"{url}?after={admin_message.data['id']}&limit=1")
+        self.assertEqual(incremental.status_code, 200)
+        self.assertEqual([message["id"] for message in incremental.data["results"]], [member_reply.data["id"]])
+        self.assertEqual(incremental.data["next_after"], member_reply.data["id"])
+        next_page = self.client.get(f"{url}?after={incremental.data['next_after']}&limit=1")
+        self.assertEqual([message["id"] for message in next_page.data["results"]], [admin_followup.data["id"]])
+        self.assertIsNone(next_page.data["next_after"])
+        self.assertEqual(
+            [message["id"] for message in self.client.get(url).data["results"]],
+            [admin_message.data["id"], member_reply.data["id"], admin_followup.data["id"]],
+        )
+        self.assertEqual(self.client.get(f"{url}?after=invalid").status_code, 400)
+        self.assertEqual(self.client.get(f"{url}?after=1&before=2").status_code, 400)
+
+        other_group_response = self.client.post("/api/groups/", {"name": "Other group"}, format="json")
+        other_group_url = f"/api/groups/{other_group_response.data['id']}/chat/"
+        self.assertEqual(other_group_response.status_code, 201)
+        self.assertEqual(self.client.get(other_group_url).data["results"], [])
+
+        self.client.force_authenticate(self.outsider)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.post(url, {"text": "Not a member"}, format="json").status_code, 404)
+        self.assertEqual(self.client.post(f"{url}read/").status_code, 404)
+
     def test_expense_chat_message_is_structured_and_idempotent(self):
         created = self.client.post(f"/api/groups/{self.group.id}/expenses/", {
             "title": "Dinner", "amount": "30.00", "date": timezone.localdate().isoformat(),

@@ -55,28 +55,45 @@ export default function GroupsPage() {
   const [sharePreview, setSharePreview] = useState('');
   const [chatExpenseDetails, setChatExpenseDetails] = useState(null);
   const [olderBefore, setOlderBefore] = useState(null);
-  const [messageText, setMessageText] = useState('');
-  const [chatRefreshing, setChatRefreshing] = useState(false);
+  const [messageDraft, setMessageDraft] = useState({ groupId: '', text: '' });
+  const [chatRefreshingGroupId, setChatRefreshingGroupId] = useState('');
+  const [chatLoading, setChatLoading] = useState(true);
+  const [chatSendingGroupId, setChatSendingGroupId] = useState('');
+  const [olderLoadingGroupId, setOlderLoadingGroupId] = useState('');
+  const [chatMessagesGroupId, setChatMessagesGroupId] = useState('');
+  const [chatErrorState, setChatErrorState] = useState({ groupId: '', message: '' });
   const [groupsRetryKey, setGroupsRetryKey] = useState(0);
   const [groupsLoading, setGroupsLoading] = useState(true);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [groupsError, setGroupsError] = useState('');
-  const [chatError, setChatError] = useState('');
   const [notice, setNotice] = useState('');
   const chatEndRef = useRef(null);
+  const chatRequestRef = useRef(null);
+  const groupIdRef = useRef(groupId);
   const inviteRequestsRef = useRef(new Map());
   const selectedGroup = useMemo(() => groups.find((group) => String(group.id) === String(groupId)), [groups, groupId]);
   const members = selectedGroup?.members || [];
   const myMembership = members.find((member) => member.user_id === user?.id);
   const money = useMemo(() => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'INR' }), []);
   const joiningInvite = Boolean(inviteCodePath || inviteToken);
-  const lastMessageId = messages[messages.length - 1]?.id;
+  const messageText = messageDraft.groupId === String(groupId) ? messageDraft.text : '';
+  const chatRefreshing = chatRefreshingGroupId === String(groupId);
+  const chatSending = chatSendingGroupId === String(groupId);
+  const olderLoading = olderLoadingGroupId === String(groupId);
+  const chatError = chatErrorState.groupId === String(groupId) ? chatErrorState.message : '';
+  const visibleMessages = chatMessagesGroupId === String(groupId) ? messages : [];
+  const visibleOlderBefore = chatMessagesGroupId === String(groupId) ? olderBefore : null;
+  const lastMessageId = visibleMessages[visibleMessages.length - 1]?.id;
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [lastMessageId]);
+
+  useEffect(() => {
+    groupIdRef.current = groupId;
+  }, [groupId]);
 
   const loadGroups = useCallback(async () => {
     const { data } = await api.get('/groups/');
@@ -137,45 +154,111 @@ export default function GroupsPage() {
   const loadWorkspace = useCallback(async (id) => {
     if (!id) return;
     try {
-      const [expenseResponse, balanceResponse, settlementResponse, messageResponse] = await Promise.all([
+      const [expenseResponse, balanceResponse, settlementResponse] = await Promise.all([
         api.get(`/groups/${id}/expenses/`),
         api.get(`/groups/${id}/balances/`),
         api.get(`/groups/${id}/settlements/`),
-        api.get(`/groups/${id}/chat/?limit=50`),
       ]);
       setExpenses(expenseResponse.data);
       setBalances(balanceResponse.data);
       setSettlements(settlementResponse.data.settlements);
-      setMessages(messageResponse.data.results);
-      setOlderBefore(messageResponse.data.next_before);
-      await api.post(`/groups/${id}/chat/read/`);
       await loadGroups();
     } catch (loadError) {
       setError(displayError(loadError, 'Unable to load this group.'));
     }
   }, [loadGroups]);
 
-  const refreshChat = useCallback(async () => {
-    if (!groupId || chatRefreshing) return;
-    setChatRefreshing(true);
+  const loadChat = useCallback(async (id = groupId) => {
+    if (!id || chatRequestRef.current) return;
+    const controller = new AbortController();
+    chatRequestRef.current = controller;
+    setChatLoading(true);
+    setChatErrorState({ groupId: String(id), message: '' });
     try {
-      const { data } = await api.get(`/groups/${groupId}/chat/?limit=50`);
-      setMessages((current) => mergeMessages(current, data.results));
+      const { data } = await api.get(`/groups/${id}/chat/?limit=50`, { signal: controller.signal });
+      if (groupIdRef.current !== String(id)) return;
+      setChatMessagesGroupId(String(id));
+      setMessages(data.results);
       setOlderBefore(data.next_before);
-      await api.post(`/groups/${groupId}/chat/read/`);
-      await loadGroups();
-      setChatError('');
-    } catch (refreshError) {
-      setChatError(displayError(refreshError, 'Unable to refresh group chat. Check the connection and try again.'));
+      if (data.results.length) {
+        await api.post(`/groups/${id}/chat/read/`, {}, { signal: controller.signal });
+        if (groupIdRef.current === String(id)) {
+          setGroups((current) => current.map((group) => (
+            String(group.id) === String(id) ? { ...group, unread_count: 0 } : group
+          )));
+        }
+      }
+    } catch (loadError) {
+      if (!controller.signal.aborted && groupIdRef.current === String(id)) {
+        setChatErrorState({
+          groupId: String(id),
+          message: displayError(loadError, 'Unable to load group chat. Check the connection and retry.'),
+        });
+      }
     } finally {
-      setChatRefreshing(false);
+      if (chatRequestRef.current === controller) chatRequestRef.current = null;
+      if (groupIdRef.current === String(id)) setChatLoading(false);
     }
-  }, [chatRefreshing, groupId, loadGroups]);
+  }, [groupId]);
+
+  const refreshChat = useCallback(async (manual = false) => {
+    const id = groupId;
+    if (!id) return;
+    const after = lastMessageId;
+    if (!after) return loadChat(id);
+    if (chatRequestRef.current) return;
+    const controller = new AbortController();
+    chatRequestRef.current = controller;
+    if (manual) setChatRefreshingGroupId(String(id));
+    try {
+      const { data } = await api.get(`/groups/${id}/chat/?after=${after}&limit=100`, {
+        signal: controller.signal,
+      });
+      if (groupIdRef.current !== String(id)) return;
+      if (data.results.length) {
+        setMessages((current) => mergeMessages(
+          chatMessagesGroupId === String(id) ? current : [],
+          data.results,
+        ));
+        setChatMessagesGroupId(String(id));
+        await api.post(`/groups/${id}/chat/read/`, {}, { signal: controller.signal });
+        if (groupIdRef.current === String(id)) {
+          setGroups((current) => current.map((group) => (
+            String(group.id) === String(id) ? { ...group, unread_count: 0 } : group
+          )));
+        }
+      }
+      setChatErrorState({ groupId: String(id), message: '' });
+    } catch (refreshError) {
+      if (!controller.signal.aborted && groupIdRef.current === String(id)) {
+        setChatErrorState({
+          groupId: String(id),
+          message: displayError(refreshError, 'Unable to refresh group chat. Check the connection and retry.'),
+        });
+      }
+    } finally {
+      if (chatRequestRef.current === controller) chatRequestRef.current = null;
+      if (manual && groupIdRef.current === String(id)) setChatRefreshingGroupId('');
+    }
+  }, [chatMessagesGroupId, groupId, lastMessageId, loadChat]);
 
   useEffect(() => {
     if (!groupId) return undefined;
     loadWorkspace(groupId);
-  }, [groupId, loadWorkspace]);
+    loadChat(groupId);
+    return () => {
+      if (chatRequestRef.current) {
+        chatRequestRef.current.abort();
+        chatRequestRef.current = null;
+      }
+    };
+  }, [groupId, loadChat, loadWorkspace]);
+
+  useEffect(() => {
+    if (!groupId) return undefined;
+    const intervalId = window.setInterval(() => { refreshChat(); }, 3000);
+    return () => window.clearInterval(intervalId);
+  }, [groupId, refreshChat]);
 
   useEffect(() => {
     setGroupForm({ name: selectedGroup?.name || '', description: selectedGroup?.description || '' });
@@ -340,12 +423,19 @@ export default function GroupsPage() {
   };
 
   const shareExpenseToChat = async (expense) => {
+    const id = groupId;
     try {
-      const { data, status: responseStatus } = await api.post(`/groups/${groupId}/chat/`, {
+      const { data, status: responseStatus } = await api.post(`/groups/${id}/chat/`, {
         message_type: 'EXPENSE',
         expense_id: expense.id,
       });
-      setMessages((current) => mergeMessages(current, [data]));
+      if (groupIdRef.current === String(id)) {
+        setMessages((current) => mergeMessages(
+          chatMessagesGroupId === String(id) ? current : [],
+          [data],
+        ));
+        setChatMessagesGroupId(String(id));
+      }
       setNotice(responseStatus === 200 ? 'This expense is already shared in the group chat.' : 'Expense shared in the group chat.');
       setError('');
     } catch (shareError) {
@@ -402,25 +492,64 @@ export default function GroupsPage() {
   const sendMessage = async (event) => {
     event.preventDefault();
     const text = messageText.trim();
-    if (!text) return;
+    const id = groupId;
+    if (!id || !text || chatSending) return;
+    setChatSendingGroupId(String(id));
+    setChatErrorState({ groupId: String(id), message: '' });
     try {
-      const { data } = await api.post(`/groups/${groupId}/chat/`, { text });
-      setMessages((current) => mergeMessages(current, [data]));
-      setMessageText('');
-      setError('');
+      const { data } = await api.post(`/groups/${id}/chat/`, { text });
+      if (groupIdRef.current === String(id)) {
+        setMessages((current) => mergeMessages(
+          chatMessagesGroupId === String(id) ? current : [],
+          [data],
+        ));
+        setChatMessagesGroupId(String(id));
+        setMessageDraft((current) => (
+          current.groupId === String(id) && current.text === text
+            ? { groupId: String(id), text: '' }
+            : current
+        ));
+      }
     } catch (sendError) {
-      setError(displayError(sendError, 'Unable to send this message. Check the connection and try again.'));
+      if (groupIdRef.current === String(id)) {
+        setChatErrorState({
+          groupId: String(id),
+          message: displayError(sendError, 'Unable to send this message. Check the connection and try again.'),
+        });
+      }
+    } finally {
+      if (groupIdRef.current === String(id)) setChatSendingGroupId('');
     }
   };
 
   const loadOlderMessages = async () => {
-    if (!olderBefore) return;
+    if (!visibleOlderBefore || chatRequestRef.current) return;
+    const id = groupId;
+    const controller = new AbortController();
+    chatRequestRef.current = controller;
+    setOlderLoadingGroupId(String(id));
     try {
-      const { data } = await api.get(`/groups/${groupId}/chat/?limit=50&before=${olderBefore}`);
-      setMessages((current) => mergeMessages(current, data.results));
-      setOlderBefore(data.next_before);
-    } catch {
-      setError('Unable to load older messages.');
+      const { data } = await api.get(`/groups/${id}/chat/?limit=50&before=${visibleOlderBefore}`, {
+        signal: controller.signal,
+      });
+      if (groupIdRef.current === String(id)) {
+        setMessages((current) => mergeMessages(
+          chatMessagesGroupId === String(id) ? current : [],
+          data.results,
+        ));
+        setChatMessagesGroupId(String(id));
+        setOlderBefore(data.next_before);
+      }
+    } catch (loadError) {
+      if (!controller.signal.aborted && groupIdRef.current === String(id)) {
+        setChatErrorState({
+          groupId: String(id),
+          message: displayError(loadError, 'Unable to load older messages.'),
+        });
+      }
+    } finally {
+      if (chatRequestRef.current === controller) chatRequestRef.current = null;
+      if (groupIdRef.current === String(id)) setOlderLoadingGroupId('');
     }
   };
 
@@ -440,7 +569,7 @@ export default function GroupsPage() {
         <p className="mt-3 max-w-2xl text-sm text-indigo-100">Plan shared spending, keep balances clear, and leave messages for your group.</p>
       </header>
 
-      {(error || groupsError || chatError || notice || joiningInvite) && <div role={joiningInvite ? 'status' : 'alert'} className={`rounded-xl border px-4 py-3 text-sm ${error || groupsError || chatError ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{joiningInvite ? 'Joining group invitation…' : error || groupsError || chatError || notice}{groupsError && <button type="button" disabled={groupsLoading} className="ml-3 font-semibold underline disabled:opacity-50" onClick={() => { setGroupsError(''); setGroupsLoading(true); setGroupsRetryKey((key) => key + 1); }}>{groupsLoading ? 'Retrying…' : 'Retry loading groups'}</button>}<button className="float-right font-semibold" onClick={() => { setError(''); setGroupsError(''); setChatError(''); setNotice(''); }}>Dismiss</button></div>}
+      {(error || groupsError || notice || joiningInvite) && <div role={joiningInvite ? 'status' : 'alert'} className={`rounded-xl border px-4 py-3 text-sm ${error || groupsError ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{joiningInvite ? 'Joining group invitation…' : error || groupsError || notice}{groupsError && <button type="button" disabled={groupsLoading} className="ml-3 font-semibold underline disabled:opacity-50" onClick={() => { setGroupsError(''); setGroupsLoading(true); setGroupsRetryKey((key) => key + 1); }}>{groupsLoading ? 'Retrying…' : 'Retry loading groups'}</button>}<button className="float-right font-semibold" onClick={() => { setError(''); setGroupsError(''); setNotice(''); }}>Dismiss</button></div>}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(240px,0.7fr)_minmax(0,2fr)]">
         <aside className="space-y-4">
@@ -539,14 +668,16 @@ export default function GroupsPage() {
               </div>
 
               <section className="flex min-h-105 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · refresh to check for new messages</p></div></div><button type="button" onClick={refreshChat} disabled={chatRefreshing} className="flex items-center gap-1.5 rounded-lg border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${chatRefreshing ? 'animate-spin' : ''}`} />{chatRefreshing ? 'Refreshing…' : 'Refresh'}</button></header>
+                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · updates every 3 seconds</p></div></div><button type="button" onClick={() => refreshChat(true)} disabled={chatRefreshing || chatLoading} className="flex items-center gap-1.5 rounded-lg border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${chatRefreshing ? 'animate-spin' : ''}`} />{chatRefreshing ? 'Refreshing…' : 'Refresh'}</button></header>
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
-                  {olderBefore && <button onClick={loadOlderMessages} className="w-full rounded-lg bg-slate-50 py-2 text-xs font-medium text-indigo-700">Load older messages</button>}
-                  {!messages.length && <p className="py-12 text-center text-sm text-slate-500">Start the conversation.</p>}
-                  {messages.map((message) => <div key={message.id} className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm ${message.sender_id === user?.id ? 'ml-auto bg-indigo-600 text-white' : 'bg-slate-100 text-slate-800'}`}><p className="mb-1 text-xs font-semibold opacity-75">{message.sender_name}</p>{message.message_type === 'EXPENSE' ? <div className="rounded-xl border border-current/15 bg-white/10 p-3"><p className="font-semibold">{message.expense_title || message.text}</p>{message.expense_amount && <p className="mt-1">{money.format(Number(message.expense_amount))}</p>}{message.expense_id && <button type="button" onClick={() => openChatExpense(message.expense_id)} className="mt-2 rounded-lg bg-white/20 px-3 py-1.5 text-xs font-semibold underline">View expense</button>}</div> : <p className="whitespace-pre-wrap wrap-break-word">{message.text}</p>}<time className="mt-1 block text-right text-[10px] opacity-70">{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>)}
+                  {chatError && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{chatError} <button type="button" onClick={() => loadChat(groupId)} disabled={chatLoading} className="ml-2 font-semibold underline">{chatLoading ? 'Retrying…' : 'Retry'}</button></div>}
+                  {visibleOlderBefore && <button onClick={loadOlderMessages} disabled={olderLoading} className="w-full rounded-lg bg-slate-50 py-2 text-xs font-medium text-indigo-700 disabled:opacity-50">{olderLoading ? 'Loading older messages…' : 'Load older messages'}</button>}
+                  {chatLoading && !visibleMessages.length && <p className="py-12 text-center text-sm text-slate-500">Loading chat…</p>}
+                  {!chatLoading && !visibleMessages.length && !chatError && <p className="py-12 text-center text-sm text-slate-500">No messages yet. Start the conversation.</p>}
+                  {visibleMessages.map((message) => <div key={message.id} className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm ${message.sender_id === user?.id ? 'ml-auto bg-indigo-600 text-white' : 'bg-slate-100 text-slate-800'}`}><p className="mb-1 text-xs font-semibold opacity-75">{message.sender_name}</p>{message.message_type === 'EXPENSE' ? <div className="rounded-xl border border-current/15 bg-white/10 p-3"><p className="font-semibold">{message.expense_title || message.text}</p>{message.expense_amount && <p className="mt-1">{money.format(Number(message.expense_amount))}</p>}{message.expense_id && <button type="button" onClick={() => openChatExpense(message.expense_id)} className="mt-2 rounded-lg bg-white/20 px-3 py-1.5 text-xs font-semibold underline">View expense</button>}</div> : <p className="whitespace-pre-wrap wrap-break-word">{message.text}</p>}<time className="mt-1 block text-right text-[10px] opacity-70">{new Date(message.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</time></div>)}
                   <div ref={chatEndRef} />
                 </div>
-                <form onSubmit={sendMessage} className="flex gap-2 border-t border-slate-100 p-3"><textarea maxLength={2000} rows={1} value={messageText} onChange={(event) => setMessageText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(event); } }} placeholder="Write a message…" className="min-w-0 flex-1 resize-y rounded-xl border border-slate-300 px-3 py-2" /><button disabled={!messageText.trim()} aria-label="Send message" className="rounded-xl bg-indigo-600 px-4 text-white disabled:opacity-40"><Send className="h-4 w-4" /></button></form>
+                <form onSubmit={sendMessage} className="flex gap-2 border-t border-slate-100 p-3"><textarea maxLength={2000} rows={1} value={messageText} onChange={(event) => setMessageDraft({ groupId: String(groupId), text: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(event); } }} placeholder="Write a message…" className="min-w-0 flex-1 resize-y rounded-xl border border-slate-300 px-3 py-2" /><button disabled={!messageText.trim() || chatSending} aria-label="Send message" className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 text-white disabled:opacity-40">{chatSending ? 'Sending…' : <Send className="h-4 w-4" />}</button></form>
               </section>
             </section>
           </div>

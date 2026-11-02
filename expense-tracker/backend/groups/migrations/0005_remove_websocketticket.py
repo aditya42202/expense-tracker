@@ -10,7 +10,13 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.DeleteModel(
-            name='WebSocketTicket',
+        # Remove the retired model without dropping ticket rows from existing databases.
+        migrations.SeparateDatabaseAndState(
+            database_operations=[],
+            state_operations=[
+                migrations.DeleteModel(
+                    name='WebSocketTicket',
+                ),
+            ],
         ),
     ]
