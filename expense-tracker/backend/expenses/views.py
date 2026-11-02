@@ -1,3 +1,5 @@
+import hashlib
+import json
 from decimal import Decimal
 from typing import cast
 
@@ -10,7 +12,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Budget, Category, CategoryBudget, Expense, GroupExpense, GroupExpenseParticipant, GroupMember, Income, Notification, Person, SavingsContribution, SavingsGoal, SettlementTransaction
+from .models import Budget, Category, CategoryBudget, Expense, ExpenseSubmission, GroupExpense, GroupExpenseParticipant, GroupMember, Income, Notification, Person, SavingsContribution, SavingsGoal, SettlementTransaction
 from .permissions import IsOwner
 from .serializers import (
     BudgetSerializer,
@@ -58,6 +60,7 @@ def _filter_transactions(queryset, request):
     if search:
         queryset = queryset.filter(
             Q(description__icontains=search)
+            | Q(merchant_name__icontains=search)
             | Q(notes__icontains=search)
             | Q(category__name__icontains=search)
             | Q(payment_method__icontains=search)
@@ -270,6 +273,45 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Expense.objects.filter(user=self.request.user).select_related("category", "person")
         return _filter_transactions(queryset, self.request).order_by("-date", "-created_at")
+
+    def create(self, request, *args, **kwargs):
+        idempotency_key = request.headers.get("Idempotency-Key", "").strip()
+        if not idempotency_key:
+            return super().create(request, *args, **kwargs)
+        if len(idempotency_key) > 64:
+            raise serializers.ValidationError({"Idempotency-Key": "The idempotency key must be at most 64 characters."})
+
+        request_hash = hashlib.sha256(
+            json.dumps(request.data, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        with transaction.atomic():
+            type(request.user).objects.select_for_update().get(pk=request.user.pk)
+            submission = ExpenseSubmission.objects.filter(user=request.user, key=idempotency_key).select_related("expense").first()
+            if submission:
+                if submission.request_hash != request_hash:
+                    return Response(
+                        {"detail": "This idempotency key was already used for a different expense."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                return Response(self.get_serializer(submission.expense).data, status=status.HTTP_200_OK)
+
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            expense = serializer.save(user=request.user)
+            ExpenseSubmission.objects.create(
+                user=request.user,
+                key=idempotency_key,
+                request_hash=request_hash,
+                expense=expense,
+            )
+            Notification.objects.create(
+                user=request.user,
+                title="Expense added",
+                message=f"{expense.description or expense.category.name} was recorded for {expense.amount}"
+                f"{f' by {expense.person.name}' if expense.person else ''}.",
+            )
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
         expense = serializer.save(user=self.request.user)

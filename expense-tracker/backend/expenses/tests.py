@@ -3,6 +3,7 @@ from datetime import date
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any, cast
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -11,8 +12,10 @@ from rest_framework.test import APIClient
 from accounts.models import User
 from .models import (
     Budget,
+    AIInsight,
     Category,
     Expense,
+    ExpenseSubmission,
     GroupExpense,
     GroupExpenseParticipant,
     GroupMember,
@@ -54,6 +57,7 @@ class ExpenseApiTests(TestCase):
                 "category": self.category.id,
                 "amount": "18.50",
                 "description": "Market vegetables",
+                "merchant_name": "Fresh Mart",
                 "notes": "Weekly shop",
                 "date": "2026-09-10",
                 "payment_method": "UPI",
@@ -62,6 +66,7 @@ class ExpenseApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         expense_id = response.json()["id"]
+        self.assertEqual(response.json()["merchant_name"], "Fresh Mart")
 
         cast(Any, Expense.objects).create(
             user=self.other_user,
@@ -87,6 +92,43 @@ class ExpenseApiTests(TestCase):
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.json()["notes"], "Updated note")
         self.assertEqual(self.client.delete(f"/api/expenses/{expense_id}/").status_code, 204)
+
+    def test_expense_idempotency_key_prevents_duplicate_submissions(self):
+        payload = {
+            "category": self.category.id,
+            "amount": "18.50",
+            "description": "Market vegetables",
+            "date": "2026-09-10",
+            "payment_method": "UPI",
+        }
+        first = self.client.post(
+            "/api/expenses/",
+            payload,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="expense-submit-1",
+        )
+        retry = self.client.post(
+            "/api/expenses/",
+            payload,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="expense-submit-1",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(retry.json()["id"], first.json()["id"])
+        self.assertEqual(Expense.objects.filter(user=self.owner).count(), 1)
+        self.assertEqual(ExpenseSubmission.objects.filter(user=self.owner).count(), 1)
+        self.assertEqual(self.owner.notifications.filter(title="Expense added").count(), 1)
+
+        payload["amount"] = "19.50"
+        mismatch = self.client.post(
+            "/api/expenses/",
+            payload,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="expense-submit-1",
+        )
+        self.assertEqual(mismatch.status_code, 409)
 
     def test_income_crud_and_dashboard_reports_are_user_scoped(self):
         income_response: Any = self.client.post(
@@ -308,3 +350,65 @@ class ExpenseApiTests(TestCase):
             ],
             [("Carol", "Alice", Decimal("30.00")), ("Carol", "Bob", Decimal("20.00"))],
         )
+
+    @patch("expenses.ai_views._request_ai", return_value="Your recorded category totals are available.")
+    def test_ai_insights_require_consent_and_store_only_generated_output(self, request_ai):
+        Expense.objects.create(
+            user=self.owner,
+            category=self.category,
+            amount="12.00",
+            description="Owner grocery",
+            date=date(2026, 9, 10),
+        )
+        Expense.objects.create(
+            user=self.other_user,
+            category=self.other_category,
+            amount="999.00",
+            description="Other private expense",
+            date=date(2026, 9, 10),
+        )
+        denied = self.client.post("/api/ai/insights/", {"consent": False}, format="json")
+        self.assertEqual(denied.status_code, 400)
+        request_ai.assert_not_called()
+
+        response = self.client.post("/api/ai/insights/", {"consent": True}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["content"], "Your recorded category totals are available.")
+        self.assertEqual(AIInsight.objects.filter(user=self.owner, feature="insights").count(), 1)
+        recent_expenses = request_ai.call_args.args[1]["financial_data"]["recent_expenses"]
+        self.assertEqual([expense["description"] for expense in recent_expenses], ["Owner grocery"])
+
+    @patch.dict("os.environ", {"OPENAI_API_KEY": ""})
+    def test_ai_endpoint_reports_missing_provider_configuration(self):
+        status_response = self.client.get("/api/ai/status/")
+        response = self.client.post("/api/ai/report/", {"consent": True}, format="json")
+
+        self.assertEqual(status_response.status_code, 200)
+        self.assertFalse(status_response.json()["configured"])
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "ai_not_configured")
+
+    @patch("expenses.ai_views._request_ai", return_value="Food")
+    def test_ai_categorization_is_restricted_to_account_categories(self, request_ai):
+        response = self.client.post(
+            "/api/ai/categorize/",
+            {"description": "Groceries", "consent": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["content"], "Food")
+        request_ai.assert_called_once()
+        self.assertEqual(request_ai.call_args.args[1]["merchant_name"], "")
+
+    @patch("expenses.ai_views._request_ai", return_value="A category that does not exist")
+    def test_ai_categorization_rejects_unavailable_categories(self, request_ai):
+        response = self.client.post(
+            "/api/ai/categorize/",
+            {"description": "Groceries", "consent": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["code"], "ai_invalid_response")
+        self.assertFalse(AIInsight.objects.filter(user=self.owner, feature="categorization").exists())

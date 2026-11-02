@@ -2,7 +2,9 @@
 
 **Manage Money. Master Your Future.**
 
-MoneyMind is a responsive personal finance app with a React/Vite client backed by a Django REST API. It supports expenses, income, budgets, savings goals, notifications, reports, and group expense settlements. SQLite is used for local development; PostgreSQL is configured through `DATABASE_URL` for production. Clients communicate only with the HTTPS API, never directly with the database.
+MoneyMind is a responsive personal finance app with a React/Vite client backed by a Django REST API. It supports expenses, income, budgets, savings goals, notifications, reports, group expense settlements, and previewable WhatsApp sharing for persisted shared expenses. SQLite is used for local development; PostgreSQL is configured through `DATABASE_URL` for production. Clients communicate only with the HTTPS API, never directly with the database.
+
+Groups use an isolated `groups` Django app, so the existing owner-scoped legacy group-expense endpoints and records remain unchanged. Group members can share equally, by custom amounts, or by percentages; balances, settlement records, unread counts, and paginated group chat are persisted. Group chat is delivered over Django Channels WebSockets. Development and tests use an in-memory channel layer; production uses Redis.
 
 The dashboard derives a month-end spending estimate from current-month spending pace and reports a financial wellness score only when income and budget data are available. The score is educational, not a credit score; emergency-fund and debt factors remain unscored because the app does not collect those details. Forecasts are estimates, not guaranteed outcomes. Savings-goal contributions are recorded separately and do not create or alter income and expense transactions.
 
@@ -37,6 +39,8 @@ npm run dev
 
 Open the Vite URL printed in the terminal, normally `http://localhost:5173`. New accounts require email verification; the local console email backend prints the OTP in the Django terminal. Use SMTP environment variables for real email delivery.
 
+For local WebSocket chat, Django's development server serves the ASGI application. If you run another server locally, start it with `daphne -b 127.0.0.1 -p 8000 config.asgi:application`.
+
 For a local frontend API override, copy `frontend/.env.example` to `frontend/.env.local`. Set `VITE_API_BASE_URL` to the API root, normally `http://127.0.0.1:8000/api`.
 
 ## Database
@@ -52,8 +56,14 @@ All private endpoints require `Authorization: Bearer <access-token>`. Sign-in re
 - Authentication: `POST /api/auth/register/`, `/login/`, `/login/verify-otp/`, `/login/resend-otp/`, `/logout/`, `/refresh/`, `/verify-otp/`, `/resend-otp/`
 - Current user/profile: `GET /api/auth/profile/`, `PUT /api/auth/profile/`, `GET /api/profile/`
 - Expenses: `GET/POST /api/expenses/`, `GET/PUT/PATCH/DELETE /api/expenses/{id}/`
+- Groups: `GET/POST /api/groups/`, `GET/PATCH/DELETE /api/groups/{id}/`; admins can add an existing account at `/members/` and create a seven-day invite at `/invite/`; authenticated users join through `POST /api/groups/join/`
+- Shared group expenses: `GET/POST /api/groups/{id}/expenses/`, `GET/PATCH/DELETE /api/groups/{id}/expenses/{expense_id}/`; request shares use `split_type` (`equal`, `custom`, or `percentage`), `shares` with membership IDs and corresponding amounts/percentages when not equal, plus payer `payments` that must total the expense amount
+- Group balances and settlements: `GET /api/groups/{id}/balances/`, `GET/POST /api/groups/{id}/settlements/`, and `POST /api/groups/{id}/settlements/{settlement_id}/settle/`
+- Group chat: `GET /api/groups/{id}/chat/?limit=50&before={message_id}` (older pages), `POST /api/groups/{id}/chat/read/`, and `POST /api/groups/{id}/chat/ticket/` to obtain a 60-second, one-use WebSocket ticket. Connect to `/ws/groups/{id}/chat/?ticket={ticket}`; never use the access JWT in the WebSocket URL
+- WhatsApp sharing: persisted group-expense cards offer an editable message preview with group, amount, payer, shares, and date; opening the WhatsApp link only pre-fills the message and never sends it automatically
 - Income: `GET/POST /api/income/`, `GET/PUT/PATCH/DELETE /api/income/{id}/`
 - Savings goals: `GET/POST /api/goals/`, standard detail update/delete routes, and `POST /api/goals/{id}/add-money/`
+- AI features: `POST /api/ai/insights/`, `/api/ai/assistant/`, `/api/ai/report/`, and `/api/ai/categorize/`
 - Categories: `GET/POST /api/categories/`, standard detail update/delete routes
 - Dashboard: `GET /api/dashboard/`, `GET /api/dashboard/reports/`, `/api/dashboard/monthly/?months=12`, `/api/dashboard/categories/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - Health: public `GET /api/health/` returns `{"status":"ok"}`
@@ -78,8 +88,12 @@ Set backend environment variables in the host dashboard or secret manager:
 - `CSRF_TRUSTED_ORIGINS`: exact trusted HTTPS origins
 - `DATABASE_URL`: provider-issued PostgreSQL URL
 - SMTP settings for account verification email
+- `OPENAI_API_KEY`: optional server-side key for the MoneyMind AI features; never expose it as a `VITE_*` variable
+- `OPENAI_MODEL`: optional OpenAI chat-completions model name (defaults to `gpt-4o-mini`)
 
-Install `backend/requirements.txt`, then run `python manage.py migrate` and `python manage.py collectstatic --noinput`. Start the WSGI app on Linux hosts with `gunicorn config.wsgi:application --bind 0.0.0.0:$PORT` from `backend/`. The settings enable PostgreSQL SSL in production, HTTPS redirects, secure session/CSRF cookies, proxy HTTPS recognition, and WhiteNoise static serving. Terminate HTTPS at the platform or reverse proxy.
+AI requests require a separate in-app consent confirmation before the user's financial summary or expense description is sent to OpenAI. Without `OPENAI_API_KEY`, the AI pages remain visible and return a clear configuration message instead of generated or sample insights. AI responses are educational and may be incomplete.
+
+Install `backend/requirements.txt`, then run `python manage.py migrate` and `python manage.py collectstatic --noinput`. The ASGI app (configured at `config.asgi:application`) must serve production HTTP and WebSockets, for example `daphne -b 0.0.0.0 -p $PORT config.asgi:application` from `backend/`; a WSGI-only server does not serve group chat. Set `REDIS_URL` to a persistent Redis/Valkey endpoint for the production Channels layer. `DEBUG=False` without `REDIS_URL` is rejected at startup. The settings enable PostgreSQL SSL in production, HTTPS redirects, secure session/CSRF cookies, proxy HTTPS recognition, and WhiteNoise static serving. Terminate HTTPS at the platform or reverse proxy.
 
 For Railway/VPS, configure the same environment values and commands in the service settings. Run database migrations as a release/pre-deploy command. Configure a persistent PostgreSQL service and back it up using the provider's managed backup process. Keep frontend and API origins restricted to the deployed domains.
 

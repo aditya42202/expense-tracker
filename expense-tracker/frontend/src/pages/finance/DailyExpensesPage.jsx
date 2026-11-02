@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../../services/api';
+import createIdempotencyKey from '../../services/idempotency';
 import { useLanguage } from '../../context/LanguageContext';
 import ExpenseShareActions from '../../components/ExpenseShareActions';
 
@@ -14,8 +16,11 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
   const [expenses, setExpenses] = useState([]);
   const [newPersonName, setNewPersonName] = useState('');
   const [summary, setSummary] = useState({ today_expense: 0, current_month_expense: 0, monthly_budget: 0, budget_remaining: 0 });
-  const [form, setForm] = useState({ amount: '', category: '', person: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+  const [form, setForm] = useState({ amount: '', category: '', person: '', description: '', merchant_name: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
   const [loading, setLoading] = useState(false);
+  const [submissionKey, setSubmissionKey] = useState(createIdempotencyKey);
+  const [suggestingCategory, setSuggestingCategory] = useState(false);
+  const [aiConsent, setAiConsent] = useState(false);
   const [message, setMessage] = useState('');
   const [createdExpense, setCreatedExpense] = useState(null);
 
@@ -58,15 +63,48 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
         amount: Number(form.amount),
         category: Number(form.category),
         person: form.person ? Number(form.person) : null,
-      });
+      }, { headers: { 'Idempotency-Key': submissionKey } });
       onExpenseChange();
       setCreatedExpense(data);
-      setForm({ amount: '', category: '', person: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+      setSubmissionKey(createIdempotencyKey());
+      setForm({ amount: '', category: '', person: '', description: '', merchant_name: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+      setAiConsent(false);
       await loadData();
     } catch (error) {
+      if (error.response?.status === 409) setSubmissionKey(createIdempotencyKey());
       setMessage(error.response?.data?.detail || 'Unable to save expense.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const suggestCategory = async () => {
+    if (!aiConsent) {
+      setMessage('Confirm consent before sending the expense description, merchant name, and category history to the AI provider.');
+      return;
+    }
+    if (!form.description.trim()) {
+      setMessage('Enter an expense description before requesting a category suggestion.');
+      return;
+    }
+    setSuggestingCategory(true);
+    setMessage('');
+    try {
+      const { data } = await api.post('/ai/categorize/', {
+        description: form.description,
+        merchant_name: form.merchant_name,
+        consent: true,
+      });
+      const suggested = categories.find((category) => category.name.toLocaleLowerCase() === data.content.toLocaleLowerCase());
+      if (!suggested) {
+        setMessage('The AI suggestion did not match one of your expense categories.');
+        return;
+      }
+      setForm((current) => ({ ...current, category: String(suggested.id) }));
+    } catch (error) {
+      setMessage(error.response?.data?.detail || 'Unable to suggest an expense category.');
+    } finally {
+      setSuggestingCategory(false);
     }
   };
 
@@ -112,6 +150,15 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">{t('Description')}</label>
             <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder={t('Potato + Onion')} required />
+            <label className="mb-1 mt-3 block text-sm font-medium text-slate-700">{t('Merchant')}</label>
+            <input type="text" maxLength={200} value={form.merchant_name} onChange={(e) => setForm({ ...form, merchant_name: e.target.value })} className="w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+            <label className="mt-2 flex items-start gap-2 text-xs text-slate-600">
+              <input type="checkbox" className="mt-0.5" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} />
+              <span>I consent to send this description, merchant name, and category history to OpenAI, as configured by MoneyMind.</span>
+            </label>
+            <button type="button" onClick={suggestCategory} disabled={suggestingCategory || !form.description.trim()} className="mt-2 inline-flex min-h-9 items-center gap-2 rounded-lg border border-emerald-200 px-3 py-1.5 text-sm font-semibold text-emerald-800 disabled:opacity-50">
+              <Sparkles className="h-4 w-4" />{suggestingCategory ? 'Suggesting...' : 'Suggest category with AI'}
+            </button>
           </div>
 
           <div>

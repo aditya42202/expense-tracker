@@ -157,6 +157,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
             "user_name",
             "amount",
             "description",
+            "merchant_name",
             "notes",
             "date",
             "payment_method",

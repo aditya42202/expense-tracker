@@ -3,6 +3,7 @@ import secrets
 from pathlib import Path
 
 import dj_database_url
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
@@ -34,6 +35,7 @@ CORS_ALLOWED_ORIGINS = list(dict.fromkeys(
     ]
 ))
 CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_origins.split(",") if origin.strip()]
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -41,12 +43,15 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "daphne",
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
+    "channels",
     "accounts",
     "expenses",
+    "groups",
 ]
 
 MIDDLEWARE = [
@@ -79,6 +84,22 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
+
+redis_url = os.getenv("REDIS_URL", "").strip()
+if redis_url:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [redis_url]},
+        }
+    }
+elif DEBUG:
+    CHANNEL_LAYERS = {
+        "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
+    }
+else:
+    raise ImproperlyConfigured("REDIS_URL must be set when DEBUG is disabled.")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
@@ -129,6 +150,9 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_THROTTLE_RATES": {
+        "ai": "20/hour",
+    },
 }
 
 SIMPLE_JWT = {

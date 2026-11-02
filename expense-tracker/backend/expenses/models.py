@@ -114,6 +114,7 @@ class Expense(models.Model):
     person = models.ForeignKey(Person, on_delete=models.SET_NULL, blank=True, null=True, related_name="expenses")
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     description = models.CharField(max_length=255, blank=True)
+    merchant_name = models.CharField(max_length=200, blank=True)
     notes = models.TextField(blank=True)
     date = models.DateField()
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, default="Cash")
@@ -122,6 +123,19 @@ class Expense(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.category.name} - {self.amount}"
+
+
+class ExpenseSubmission(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="expense_submissions")
+    key = models.CharField(max_length=64)
+    request_hash = models.CharField(max_length=64)
+    expense = models.ForeignKey(Expense, on_delete=models.CASCADE, related_name="submissions")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "key"], name="unique_expense_submission_key"),
+        ]
 
 
 class Income(models.Model):
@@ -215,3 +229,24 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.title}"
+
+
+class AIInsight(models.Model):
+    FEATURE_CHOICES = [
+        ("insights", "Financial insights"),
+        ("assistant", "Financial assistant"),
+        ("report", "Monthly report"),
+        ("categorization", "Expense categorization"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ai_insights")
+    feature = models.CharField(max_length=30, choices=FEATURE_CHOICES)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "feature", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.feature} - {self.created_at:%Y-%m-%d}"

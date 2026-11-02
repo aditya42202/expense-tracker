@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Download, FileDown } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -166,7 +167,10 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-bold text-slate-900">{t('Reports & insights')}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold text-slate-900">{t('Reports & insights')}</h1>
+          <Link to="/ai-insights" className="rounded-lg bg-[#173d32] px-4 py-2 text-sm font-semibold text-white hover:bg-[#205440]">{t('Open AI monthly report')}</Link>
+        </div>
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {stats.map((item) => (
             <div key={item.label} className={`rounded-xl p-4 ${item.tone}`}>

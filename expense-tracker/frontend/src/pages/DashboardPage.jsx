@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, BanknoteArrowUp, CalendarDays, CirclePlus, CreditCard, ListChecks, PiggyBank, ReceiptText, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, BanknoteArrowUp, BrainCircuit, CalendarDays, CirclePlus, CreditCard, ListChecks, PiggyBank, ReceiptText, Wallet } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, Tooltip, XAxis, YAxis } from 'recharts';
 import api from '../services/api';
@@ -240,6 +240,14 @@ export default function DashboardPage() {
           </p>
         </article>
       </section>
+
+      <Link to="/ai-insights" className="flex flex-col justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 transition hover:border-emerald-300 hover:bg-emerald-100 sm:flex-row sm:items-center">
+        <div className="flex items-start gap-3">
+          <span className="rounded-xl bg-white p-3 text-emerald-800"><BrainCircuit className="h-5 w-5" /></span>
+          <div><h2 className="font-semibold text-emerald-950">{t('AI Financial Insights')}</h2><p className="mt-1 text-sm text-emerald-900/75">{t('Explore spending patterns, budget suggestions, and AI-generated monthly reports.')}</p></div>
+        </div>
+        <span className="shrink-0 text-sm font-semibold text-emerald-900">{t('Open AI Insights')} →</span>
+      </Link>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <div>

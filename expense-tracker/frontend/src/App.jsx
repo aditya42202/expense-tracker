@@ -13,6 +13,9 @@ import ReportsPage from './pages/finance/ReportsPage';
 import ProfilePage from './pages/finance/ProfilePage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
+import AIInsightsPage from './pages/AIInsightsPage';
+import AIAssistantPage from './pages/AIAssistantPage';
+import GroupsPage from './pages/GroupsPage';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -59,10 +62,13 @@ function AppRoutes() {
       <Route path="/daily-expenses" element={<Navigate to="/expenses?view=daily" replace />} />
       <Route path="/expenses" element={<ProtectedRoute><UnifiedExpensesPage /></ProtectedRoute>} />
       <Route path="/group-expenses" element={<Navigate to="/expenses?view=group" replace />} />
+      <Route path="/groups" element={<ProtectedRoute><GroupsPage /></ProtectedRoute>} />
       <Route path="/income" element={<ProtectedRoute><IncomePage /></ProtectedRoute>} />
       <Route path="/budget" element={<ProtectedRoute><BudgetPage /></ProtectedRoute>} />
       <Route path="/savings" element={<ProtectedRoute><SavingsPage /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
+      <Route path="/ai-insights" element={<ProtectedRoute><AIInsightsPage /></ProtectedRoute>} />
+      <Route path="/ai-assistant" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
       <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

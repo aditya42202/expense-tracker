@@ -1,4 +1,4 @@
-import { BarChart3, Bell, CreditCard, Gauge, LayoutDashboard, LogOut, Menu, PiggyBank, Settings, TrendingUp, UserRound, Wallet } from 'lucide-react';
+import { BarChart3, Bell, Bot, CreditCard, Gauge, LayoutDashboard, LogOut, Menu, PiggyBank, Settings, TrendingUp, UserRound, Users, Wallet } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -8,10 +8,13 @@ import api from '../services/api';
 const navItems = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
   { label: 'Expenses', to: '/expenses', icon: CreditCard },
+  { label: 'Groups', to: '/groups', icon: Users },
   { label: 'Income', to: '/income', icon: TrendingUp },
   { label: 'Budget', to: '/budget', icon: Gauge },
   { label: 'Savings', to: '/savings', icon: PiggyBank },
   { label: 'Reports', to: '/reports', icon: BarChart3 },
+  { label: 'AI Insights', to: '/ai-insights', icon: Bot },
+  { label: 'AI Assistant', to: '/ai-assistant', icon: Bot },
   { label: 'Notifications', to: '/notifications', icon: Bell },
   { label: 'Profile', to: '/profile', icon: UserRound },
   { label: 'Settings', to: '/settings', icon: Settings },

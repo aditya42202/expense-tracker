@@ -1,6 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .ai_views import AIAssistantView, AICategorizationView, AIInsightsView, AIReportView, AIStatusView
 from .views import (
     BudgetViewSet,
     CategoryBudgetViewSet,
@@ -34,4 +35,9 @@ router.register(r"settlements", SettlementViewSet, basename="settlement")
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("ai/insights/", AIInsightsView.as_view(), name="ai-insights"),
+    path("ai/status/", AIStatusView.as_view(), name="ai-status"),
+    path("ai/assistant/", AIAssistantView.as_view(), name="ai-assistant"),
+    path("ai/report/", AIReportView.as_view(), name="ai-report"),
+    path("ai/categorize/", AICategorizationView.as_view(), name="ai-categorize"),
 ]

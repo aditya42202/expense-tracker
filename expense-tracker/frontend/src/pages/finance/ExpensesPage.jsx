@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PencilLine, Plus, Search, Trash2 } from 'lucide-react';
+import { PencilLine, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
+import createIdempotencyKey from '../../services/idempotency';
 import { useLanguage } from '../../context/LanguageContext';
 import ExpenseShareActions from '../../components/ExpenseShareActions';
 
@@ -20,12 +21,17 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [createdExpense, setCreatedExpense] = useState(null);
+  const [submissionKey, setSubmissionKey] = useState(createIdempotencyKey);
+  const [saving, setSaving] = useState(false);
+  const [suggestingCategory, setSuggestingCategory] = useState(false);
+  const [aiConsent, setAiConsent] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [form, setForm] = useState({ id: null, category: '', person: '', amount: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+  const [form, setForm] = useState({ id: null, category: '', person: '', amount: '', description: '', merchant_name: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
 
   const loadData = async () => {
     try {
@@ -51,7 +57,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
 
   const filteredExpenses = useMemo(() => {
     const list = [...expenses].filter((item) => {
-      const matchesQuery = !query || [item.description, item.notes, item.category_name, item.person_name, item.payment_method].join(' ').toLowerCase().includes(query.toLowerCase());
+      const matchesQuery = !query || [item.description, item.merchant_name, item.notes, item.category_name, item.person_name, item.payment_method].join(' ').toLowerCase().includes(query.toLowerCase());
       const matchesDate = (!dateFrom || item.date >= dateFrom) && (!dateTo || item.date <= dateTo);
       const matchesCategory = !categoryFilter || String(item.category) === categoryFilter;
       return matchesQuery && matchesDate && matchesCategory;
@@ -69,6 +75,15 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
     }
   }, [expenses, query, sort, dateFrom, dateTo, categoryFilter]);
   const linkedExpense = expenses.find((item) => String(item.id) === entryId);
+  const selectedExpenses = expenses.filter((item) => selectedIds.includes(item.id));
+  const bulkShareMessage = [
+    '💰 MoneyMind Expense Summary',
+    '',
+    ...selectedExpenses.map((item) => `${item.date} · ${item.description || item.category_name}: ${localizedPreciseMoney.format(Number(item.amount))}`),
+    '',
+    'Manage Money. Master Your Future.',
+    'Shared via MoneyMind.',
+  ].join('\n');
 
   const personTotals = useMemo(() => people.map((person) => {
     const personExpenses = expenses.filter((expense) => expense.person === person.id);
@@ -119,12 +134,15 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setSaving(true);
+    setCreatedExpense(null);
     try {
       const payload = {
         category: Number(form.category),
         person: form.person ? Number(form.person) : null,
         amount: Number(form.amount),
         description: form.description,
+        merchant_name: form.merchant_name,
         notes: form.notes,
         date: form.date,
         payment_method: form.payment_method,
@@ -133,16 +151,58 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
       if (form.id) {
         await api.put(`/expenses/${form.id}/`, payload);
       } else {
-        const { data } = await api.post('/expenses/', payload);
+        const { data } = await api.post('/expenses/', payload, { headers: { 'Idempotency-Key': submissionKey } });
         setCreatedExpense(data);
+        setSubmissionKey(createIdempotencyKey());
       }
 
       onExpenseChange();
-      setForm({ id: null, category: '', person: '', amount: '', description: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+      setForm({ id: null, category: '', person: '', amount: '', description: '', merchant_name: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
+      setAiConsent(false);
       loadData();
     } catch (err) {
+      if (err.response?.status === 409) setSubmissionKey(createIdempotencyKey());
       setError(err.response?.data?.detail || 'Unable to save expense.');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const suggestCategory = async () => {
+    if (!aiConsent) {
+      setError('Confirm consent before sending the expense description and category history to the AI provider.');
+      return;
+    }
+    if (!form.description.trim()) {
+      setError('Enter an expense description before requesting a category suggestion.');
+      return;
+    }
+    setSuggestingCategory(true);
+    setError('');
+    try {
+      const { data } = await api.post('/ai/categorize/', { description: form.description, merchant_name: form.merchant_name, consent: true });
+      const suggested = categories.find((item) => item.name.toLocaleLowerCase() === data.content.toLocaleLowerCase());
+      if (!suggested) {
+        setError('The AI suggestion did not match one of your expense categories.');
+        return;
+      }
+      setForm((current) => ({ ...current, category: String(suggested.id) }));
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Unable to suggest an expense category.');
+    } finally {
+      setSuggestingCategory(false);
+    }
+  };
+
+  const toggleSelected = (id) => setSelectedIds((current) => (
+    current.includes(id) ? current.filter((selectedId) => selectedId !== id) : [...current, id]
+  ));
+
+  const selectVisible = () => {
+    const visibleIds = filteredExpenses.map((item) => item.id);
+    setSelectedIds((current) => visibleIds.every((id) => current.includes(id))
+      ? current.filter((id) => !visibleIds.includes(id))
+      : [...new Set([...current, ...visibleIds])]);
   };
 
   const handleAddPerson = async (e) => {
@@ -184,12 +244,14 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   };
 
   const handleEdit = (item) => {
+    setCreatedExpense(null);
     setForm({
       id: item.id,
       category: item.category,
       person: item.person ? String(item.person) : '',
       amount: item.amount,
       description: item.description || '',
+      merchant_name: item.merchant_name || '',
       notes: item.notes || '',
       date: item.date,
       payment_method: item.payment_method,
@@ -333,6 +395,15 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">{t('Description')}</label>
             <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-900 focus:border-indigo-400" required />
+            <label className="mb-1 mt-3 block text-sm font-medium text-slate-700">{t('Merchant')}</label>
+            <input type="text" maxLength={200} value={form.merchant_name} onChange={(e) => setForm({ ...form, merchant_name: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-900 focus:border-indigo-400" />
+            <label className="mt-2 flex items-start gap-2 text-xs text-slate-600">
+              <input type="checkbox" className="mt-0.5" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} />
+              <span>I consent to send this description, merchant name, and category history to OpenAI, as configured by MoneyMind.</span>
+            </label>
+            <button type="button" onClick={suggestCategory} disabled={suggestingCategory || !form.description.trim()} className="mt-2 inline-flex min-h-9 items-center gap-2 rounded-lg border border-emerald-200 px-3 py-1.5 text-sm font-semibold text-emerald-800 disabled:opacity-50">
+              <Sparkles className="h-4 w-4" />{suggestingCategory ? 'Suggesting...' : 'Suggest category with AI'}
+            </button>
           </div>
 
           <div>
@@ -353,8 +424,8 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
             </div>
           </div>
 
-          <button type="submit" className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500">
-            {t(form.id ? 'Update expense' : 'Save expense')}
+          <button type="submit" disabled={saving} className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60">
+            {saving ? t('Saving...') : t(form.id ? 'Update expense' : 'Save expense')}
           </button>
           {createdExpense && <ExpenseShareActions expense={createdExpense} />}
         </form>
@@ -379,6 +450,12 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Search expenses')} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm text-slate-900 focus:border-indigo-400" />
             </div>
+            {selectedExpenses.length > 0 && (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-sm font-medium text-emerald-950">{selectedExpenses.length} {t('expenses selected')}</p>
+                <ExpenseShareActions expense={selectedExpenses[0]} compact buttonLabel="Review and share on WhatsApp" messageOverride={bulkShareMessage} />
+              </div>
+            )}
             <select value={sort} onChange={(e) => setSort(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 focus:border-indigo-400">
               <option value="newest">{t('Newest')}</option>
               <option value="oldest">{t('Oldest')}</option>
@@ -407,6 +484,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
               <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
+                    <th className="px-3 py-3"><button type="button" onClick={selectVisible} className="text-xs font-semibold">{t('Select visible')}</button></th>
                     <th className="px-3 py-3">{t('Date')}</th>
                     <th className="px-3 py-3">{t('Category')}</th>
                     <th className="px-3 py-3">{t('Paid by')}</th>
@@ -419,6 +497,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                 <tbody>
                   {filteredExpenses.map((item) => (
                     <tr key={item.id} className="border-t border-slate-200">
+                      <td className="px-3 py-3"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleSelected(item.id)} aria-label={`${t('Select expense')} ${item.description || item.category_name}`} /></td>
                       <td className="px-3 py-3">{item.date}</td>
                       <td className="px-3 py-3">{item.category_name}</td>
                       <td className="px-3 py-3">{item.person_name || '-'}</td>
@@ -427,6 +506,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                       <td className="px-3 py-3">{item.payment_method}</td>
                       <td className="px-3 py-3">
                         <div className="flex justify-end gap-2">
+                          <ExpenseShareActions expense={item} compact />
                           <button type="button" onClick={() => handleEdit(item)} className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50" aria-label={t('Edit expense')}>
                             <PencilLine className="h-4 w-4" />
                           </button>
