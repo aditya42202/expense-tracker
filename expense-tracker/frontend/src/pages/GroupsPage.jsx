@@ -20,7 +20,7 @@ export default function GroupsPage() {
   const [percentageShares, setPercentageShares] = useState({});
   const [payerAmounts, setPayerAmounts] = useState({});
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteUrl, setInviteUrl] = useState('');
+  const [invite, setInvite] = useState({ groupId: '', code: '', url: '' });
   const [joinToken, setJoinToken] = useState('');
   const [expenses, setExpenses] = useState([]);
   const [balances, setBalances] = useState({ balances: [], suggested_transfers: [] });
@@ -90,34 +90,102 @@ export default function GroupsPage() {
     loadWorkspace(groupId);
     let live = true;
     let socket;
+    let reconnectTimer;
+    let pollingTimer;
+    let retryDelay = 1000;
+    let latestMessageId = 0;
+
+    const pollMessages = async () => {
+      try {
+        const { data } = await api.get(`/groups/${groupId}/chat/?limit=50`);
+        if (!live) return;
+        const hasUnreadMessages = data.results.some(
+          (message) => message.id > latestMessageId && message.sender_id !== user?.id,
+        );
+        latestMessageId = Math.max(latestMessageId, ...data.results.map((message) => message.id), 0);
+        setMessages((current) => {
+          const merged = new Map(current.map((message) => [message.id, message]));
+          data.results.forEach((message) => merged.set(message.id, message));
+          return [...merged.values()].sort((left, right) => left.id - right.id);
+        });
+        setOlderBefore(data.next_before);
+        if (hasUnreadMessages) {
+          await api.post(`/groups/${groupId}/chat/read/`);
+          await loadGroups();
+        }
+      } catch {
+        if (live) setConnection('disconnected');
+      }
+    };
+
+    const startPolling = () => {
+      setConnection('polling');
+      if (!pollingTimer) {
+        pollMessages();
+        pollingTimer = window.setInterval(pollMessages, 3000);
+      }
+    };
+
+    const scheduleReconnect = () => {
+      if (!live || reconnectTimer) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = undefined;
+        connect();
+      }, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 30000);
+    };
+
     const connect = async () => {
       try {
         const { data } = await api.post(`/groups/${groupId}/chat/ticket/`);
         if (!live) return;
         const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
-        const wsBase = apiUrl.replace(/\/api\/?$/, '').replace(/^http/, 'ws');
-        socket = new WebSocket(`${wsBase}/ws/groups/${groupId}/chat/?ticket=${encodeURIComponent(data.ticket)}`);
+        const apiOrigin = new URL(apiUrl).origin;
+        const wsUrl = new URL(`/ws/groups/${groupId}/chat/`, apiOrigin);
+        wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl.searchParams.set('ticket', data.ticket);
+        socket = new WebSocket(wsUrl.toString());
         socketRef.current = socket;
-        socket.onopen = () => live && setConnection('connected');
-        socket.onclose = () => live && setConnection('disconnected');
-        socket.onerror = () => live && setConnection('disconnected');
+        socket.onopen = () => {
+          if (!live) return;
+          setConnection('connected');
+          retryDelay = 1000;
+          window.clearInterval(pollingTimer);
+          pollingTimer = undefined;
+          window.clearTimeout(reconnectTimer);
+          reconnectTimer = undefined;
+        };
+        socket.onclose = () => {
+          if (!live) return;
+          startPolling();
+          scheduleReconnect();
+        };
+        socket.onerror = () => socket?.close();
         socket.onmessage = (event) => {
           const payload = JSON.parse(event.data);
           if (payload.type !== 'message') return;
+          latestMessageId = Math.max(latestMessageId, payload.message.id);
           setMessages((current) => current.some((message) => message.id === payload.message.id) ? current : [...current, payload.message]);
-          api.post(`/groups/${groupId}/chat/read/`).then(() => loadGroups()).catch(() => {});
+          api.post(`/groups/${groupId}/chat/read/`).then(() => loadGroups()).catch((readError) => {
+            setError(displayError(readError, 'Unable to update the chat read status.'));
+          });
         };
       } catch {
-        if (live) setConnection('disconnected');
+        if (live) {
+          startPolling();
+          scheduleReconnect();
+        }
       }
     };
     connect();
     return () => {
       live = false;
+      window.clearTimeout(reconnectTimer);
+      window.clearInterval(pollingTimer);
       socket?.close();
       socketRef.current = null;
     };
-  }, [groupId, loadWorkspace, loadGroups]);
+  }, [groupId, loadWorkspace, loadGroups, user?.id]);
 
   useEffect(() => {
     setGroupForm({ name: selectedGroup?.name || '', description: selectedGroup?.description || '' });
@@ -180,9 +248,23 @@ export default function GroupsPage() {
   const createInvite = async () => {
     try {
       const { data } = await api.post(`/groups/${groupId}/invite/`);
-      setInviteUrl(`${window.location.origin}/groups?invite=${encodeURIComponent(data.token)}`);
+      const inviteUrl = new URL('/groups', window.location.origin);
+      inviteUrl.searchParams.set('invite', data.token);
+      setInvite({ groupId, code: data.token, url: inviteUrl.toString() });
+      setNotice('Invitation code and link created. They expire in 7 days.');
+      setError('');
     } catch (inviteError) {
       setError(displayError(inviteError, 'Unable to create an invite.'));
+    }
+  };
+
+  const copyInviteValue = async (value, label) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setNotice(`${label} copied.`);
+      setError('');
+    } catch {
+      setError(`Unable to copy the invitation ${label.toLowerCase()}. Check browser clipboard permissions.`);
     }
   };
 
@@ -289,12 +371,25 @@ export default function GroupsPage() {
     }
   };
 
-  const sendMessage = (event) => {
+  const sendMessage = async (event) => {
     event.preventDefault();
     const text = messageText.trim();
-    if (!text || socketRef.current?.readyState !== WebSocket.OPEN) return;
-    socketRef.current.send(JSON.stringify({ text }));
-    setMessageText('');
+    if (!text) return;
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ text }));
+      setMessageText('');
+      return;
+    }
+    try {
+      const { data } = await api.post(`/groups/${groupId}/chat/`, { text });
+      setMessages((current) => current.some((message) => message.id === data.id)
+        ? current
+        : [...current, data].sort((left, right) => left.id - right.id));
+      setMessageText('');
+      setError('');
+    } catch (sendError) {
+      setError(displayError(sendError, 'Unable to send this message. Check the connection and try again.'));
+    }
   };
 
   const loadOlderMessages = async () => {
@@ -366,11 +461,22 @@ export default function GroupsPage() {
                 <input type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="Existing user's email" className="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm" />
                 <button disabled={myMembership?.role !== 'admin'} className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">Add member</button>
               </form>
-              <div className="flex gap-2">
-                <button onClick={createInvite} disabled={myMembership?.role !== 'admin'} className="rounded-xl border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 disabled:opacity-40">Create invite link</button>
-                {inviteUrl && <button onClick={() => navigator.clipboard.writeText(inviteUrl).then(() => setNotice('Invite link copied.'))} className="truncate rounded-xl bg-indigo-50 px-3 py-2 text-xs text-indigo-700">Copy link</button>}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={createInvite} disabled={myMembership?.role !== 'admin'} className="rounded-xl border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 disabled:opacity-40">Create invitation code and link</button>
+                {invite.groupId === groupId && <>
+                  <button type="button" onClick={() => copyInviteValue(invite.code, 'Invitation code')} className="rounded-xl bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">Copy code</button>
+                  <button type="button" onClick={() => copyInviteValue(invite.url, 'Invitation link')} className="rounded-xl bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">Copy link</button>
+                </>}
               </div>
-              {inviteUrl && <p className="break-all text-xs text-slate-500 sm:col-span-2">Invite expires in 7 days: {inviteUrl}</p>}
+              {invite.groupId === groupId && <div className="space-y-2 sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-600">Invite code (valid for 7 days)
+                  <input readOnly value={invite.code} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700" />
+                </label>
+                <label className="block text-xs font-semibold text-slate-600">Invitation link
+                  <input readOnly value={invite.url} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700" />
+                </label>
+                <p className="text-xs text-slate-500">Anyone with this code or link can join this group before it expires.</p>
+              </div>}
             </div>
           </section>
 
@@ -410,7 +516,7 @@ export default function GroupsPage() {
               </div>
 
               <section className="flex min-h-105 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · <span className={connection === 'connected' ? 'text-emerald-600' : 'text-amber-600'}>{connection}</span></p></div></div></header>
+                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · <span className={connection === 'connected' ? 'text-emerald-600' : connection === 'polling' ? 'text-amber-600' : 'text-rose-600'}>{connection === 'connected' ? 'live' : connection === 'polling' ? 'backup mode · retrying live connection' : connection}</span></p></div></div></header>
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
                   {olderBefore && <button onClick={loadOlderMessages} className="w-full rounded-lg bg-slate-50 py-2 text-xs font-medium text-indigo-700">Load older messages</button>}
                   {!messages.length && <p className="py-12 text-center text-sm text-slate-500">Start the conversation.</p>}
