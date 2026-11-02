@@ -2,17 +2,12 @@ from datetime import timedelta
 from typing import Any, Protocol, cast
 from unittest.mock import patch
 
-from asgiref.sync import async_to_sync
-from channels.exceptions import InvalidChannelLayerError
-from channels.testing import WebsocketCommunicator
 from django.db import DatabaseError
 from django.test import TransactionTestCase
 from django.utils import timezone
-from redis.exceptions import RedisError
 from rest_framework.test import APIClient
 
 from accounts.models import User
-from config.asgi import application
 from expenses.models import AIInsight
 from .models import ChatMessage, ExpenseShare, Group, Membership, SharedExpense
 
@@ -189,8 +184,11 @@ class GroupAPITests(TransactionTestCase):
         self.client.force_authenticate(self.member)
         sent = self.client.post(f"/api/groups/{self.group.id}/chat/", {"text": "Hi there"}, format="json")
         self.assertEqual(sent.status_code, 201, sent.data)
+        self.assertNotIn("delivery_status", sent.data)
         self.assertTrue(ChatMessage.objects.filter(group=self.group, text="Hi there").exists())
         self.client.force_authenticate(self.owner)
+        history = self.client.get(f"/api/groups/{self.group.id}/chat/").data["results"]
+        self.assertTrue(any(message["text"] == "Hi there" for message in history))
         sent = self.client.post(f"/api/groups/{self.group.id}/chat/", {"text": "Hello"}, format="json")
         self.assertEqual(sent.status_code, 201, sent.data)
         page = self.client.get(f"/api/groups/{self.group.id}/chat/?limit=1")
@@ -281,83 +279,6 @@ class GroupAPITests(TransactionTestCase):
         self.assertEqual(first_invite.data["code"], "123456")
         self.assertEqual(second_invite.status_code, 200, second_invite.data)
         self.assertEqual(second_invite.data["code"], "654321")
-
-    def test_websocket_ticket_is_one_use_and_delivers_persisted_messages(self):
-        ticket = self.client.post(f"/api/groups/{self.group.id}/chat/ticket/", {}, format="json").data["ticket"]
-
-        async def send_and_receive():
-            communicator = WebsocketCommunicator(
-                application,
-                f"/ws/groups/{self.group.id}/chat/?ticket={ticket}",
-                headers=[(b"origin", b"http://localhost:5173")],
-            )
-            connected, _ = await communicator.connect()
-            self.assertTrue(connected)
-            await communicator.send_json_to({"text": "Live from the group"})
-            event = await communicator.receive_json_from()
-            await communicator.disconnect()
-            return event
-
-        event = async_to_sync(send_and_receive)()
-        self.assertEqual(event["type"], "message")
-        self.assertEqual(event["message"]["text"], "Live from the group")
-        self.assertTrue(ChatMessage.objects.filter(group=self.group, text="Live from the group").exists())
-
-        async def reuse_ticket():
-            communicator = WebsocketCommunicator(
-                application,
-                f"/ws/groups/{self.group.id}/chat/?ticket={ticket}",
-                headers=[(b"origin", b"http://localhost:5173")],
-            )
-            connected, close_code = await communicator.connect()
-            if connected:
-                await communicator.disconnect()
-            return connected, close_code
-
-        connected, close_code = async_to_sync(reuse_ticket)()
-        self.assertFalse(connected)
-        self.assertEqual(close_code, 4403)
-
-    @patch("groups.views.get_channel_layer")
-    def test_chat_message_is_saved_when_redis_delivery_is_unavailable(self, get_channel_layer):
-        class FailingChannelLayer:
-            async def group_send(self, *_args, **_kwargs):
-                raise RedisError("Redis unavailable")
-
-        get_channel_layer.return_value = FailingChannelLayer()
-        response = self.client.post(
-            f"/api/groups/{self.group.id}/chat/",
-            {"text": "Persist despite a Redis interruption"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["delivery_status"], "polling")
-        self.assertTrue(ChatMessage.objects.filter(group=self.group, text=response.data["text"]).exists())
-
-    @patch("groups.views.get_channel_layer", return_value=None)
-    def test_chat_message_is_saved_when_channel_layer_is_not_configured(self, _get_channel_layer):
-        response = self.client.post(
-            f"/api/groups/{self.group.id}/chat/",
-            {"text": "Persist without a live channel layer"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["delivery_status"], "polling")
-        self.assertTrue(ChatMessage.objects.filter(group=self.group, text=response.data["text"]).exists())
-
-    @patch("groups.views.get_channel_layer", side_effect=InvalidChannelLayerError("invalid backend"))
-    def test_chat_message_is_saved_when_channel_layer_is_misconfigured(self, _get_channel_layer):
-        response = self.client.post(
-            f"/api/groups/{self.group.id}/chat/",
-            {"text": "Persist with an invalid channel backend"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["delivery_status"], "polling")
-        self.assertTrue(ChatMessage.objects.filter(group=self.group, text=response.data["text"]).exists())
 
     @patch("groups.views.get_object_or_404", side_effect=DatabaseError("database unavailable"))
     def test_chat_database_errors_return_safe_service_unavailable_response(self, _get_object):

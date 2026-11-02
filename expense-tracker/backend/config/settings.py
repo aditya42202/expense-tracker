@@ -43,12 +43,10 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
-    "daphne",
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
-    "channels",
     "accounts",
     "expenses",
     "groups",
@@ -84,23 +82,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
-
-redis_url = os.getenv("REDIS_URL", "").strip()
-if redis_url:
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [redis_url]},
-        }
-    }
-elif DEBUG:
-    CHANNEL_LAYERS = {
-        "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
-    }
-else:
-    raise ImproperlyConfigured("REDIS_URL must be set when DEBUG is disabled.")
-
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     if not DEBUG:

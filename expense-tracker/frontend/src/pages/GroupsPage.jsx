@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, MessageCircle, Plus, Send, Share2, Users } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, MessageCircle, Plus, RefreshCw, Send, Share2, Users } from 'lucide-react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import api, { API_BASE_URL } from '../services/api';
+import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -56,8 +56,7 @@ export default function GroupsPage() {
   const [chatExpenseDetails, setChatExpenseDetails] = useState(null);
   const [olderBefore, setOlderBefore] = useState(null);
   const [messageText, setMessageText] = useState('');
-  const [connection, setConnection] = useState('connecting');
-  const [reconnectKey, setReconnectKey] = useState(0);
+  const [chatRefreshing, setChatRefreshing] = useState(false);
   const [groupsRetryKey, setGroupsRetryKey] = useState(0);
   const [groupsLoading, setGroupsLoading] = useState(true);
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -66,7 +65,6 @@ export default function GroupsPage() {
   const [groupsError, setGroupsError] = useState('');
   const [chatError, setChatError] = useState('');
   const [notice, setNotice] = useState('');
-  const socketRef = useRef(null);
   const chatEndRef = useRef(null);
   const inviteRequestsRef = useRef(new Map());
   const selectedGroup = useMemo(() => groups.find((group) => String(group.id) === String(groupId)), [groups, groupId]);
@@ -157,125 +155,27 @@ export default function GroupsPage() {
     }
   }, [loadGroups]);
 
+  const refreshChat = useCallback(async () => {
+    if (!groupId || chatRefreshing) return;
+    setChatRefreshing(true);
+    try {
+      const { data } = await api.get(`/groups/${groupId}/chat/?limit=50`);
+      setMessages((current) => mergeMessages(current, data.results));
+      setOlderBefore(data.next_before);
+      await api.post(`/groups/${groupId}/chat/read/`);
+      await loadGroups();
+      setChatError('');
+    } catch (refreshError) {
+      setChatError(displayError(refreshError, 'Unable to refresh group chat. Check the connection and try again.'));
+    } finally {
+      setChatRefreshing(false);
+    }
+  }, [chatRefreshing, groupId, loadGroups]);
+
   useEffect(() => {
     if (!groupId) return undefined;
     loadWorkspace(groupId);
-    let live = true;
-    let socket;
-    let socketTimeout;
-    let reconnectTimer;
-    let pollingTimer;
-    let retryDelay = 1000;
-    let failedAttempts = 0;
-    let latestMessageId = 0;
-
-    const pollMessages = async () => {
-      try {
-        const { data } = await api.get(`/groups/${groupId}/chat/?limit=50`);
-        if (!live) return;
-        setChatError('');
-        setConnection((current) => (
-          current === 'disconnected' ? (failedAttempts > 3 ? 'fallback' : 'polling') : current
-        ));
-        const hasUnreadMessages = data.results.some(
-          (message) => message.id > latestMessageId && message.sender_id !== user?.id,
-        );
-        latestMessageId = Math.max(latestMessageId, ...data.results.map((message) => message.id), 0);
-        setMessages((current) => mergeMessages(current, data.results));
-        setOlderBefore(data.next_before);
-        if (hasUnreadMessages) {
-          await api.post(`/groups/${groupId}/chat/read/`);
-          await loadGroups();
-        }
-      } catch (pollError) {
-        if (live) {
-          setConnection('disconnected');
-          setChatError(displayError(pollError, 'Unable to sync group chat. Check the connection and try again.'));
-        }
-      }
-    };
-
-    const startPolling = () => {
-      setConnection('polling');
-      if (!pollingTimer) {
-        pollMessages();
-        pollingTimer = window.setInterval(pollMessages, 3000);
-      }
-    };
-
-    const scheduleReconnect = () => {
-      if (!live || reconnectTimer) return;
-      reconnectTimer = window.setTimeout(() => {
-        reconnectTimer = undefined;
-        connect();
-      }, retryDelay);
-      retryDelay = Math.min(retryDelay * 2, 30000);
-    };
-
-    const handleConnectionFailure = () => {
-      startPolling();
-      failedAttempts += 1;
-      if (failedAttempts <= 3) {
-        scheduleReconnect();
-      } else {
-        setConnection('fallback');
-      }
-    };
-
-    const connect = async () => {
-      try {
-        const { data } = await api.post(`/groups/${groupId}/chat/ticket/`);
-          if (!live) return;
-          const apiOrigin = new URL(API_BASE_URL).origin;
-          const wsUrl = new URL(`/ws/groups/${groupId}/chat/`, apiOrigin);
-          wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-          wsUrl.searchParams.set('ticket', data.ticket);
-        socket = new WebSocket(wsUrl.toString());
-        socketRef.current = socket;
-        socketTimeout = window.setTimeout(() => {
-          if (socket?.readyState === WebSocket.CONNECTING) socket.close();
-        }, 8000);
-        socket.onopen = () => {
-          if (!live) return;
-          window.clearTimeout(socketTimeout);
-          setConnection('connected');
-          setChatError('');
-          failedAttempts = 0;
-          retryDelay = 1000;
-          window.clearInterval(pollingTimer);
-          pollingTimer = undefined;
-          window.clearTimeout(reconnectTimer);
-          reconnectTimer = undefined;
-        };
-        socket.onclose = () => {
-          window.clearTimeout(socketTimeout);
-          if (!live) return;
-          handleConnectionFailure();
-        };
-        socket.onerror = () => socket?.close();
-        socket.onmessage = (event) => {
-          const payload = JSON.parse(event.data);
-          if (payload.type !== 'message') return;
-          latestMessageId = Math.max(latestMessageId, payload.message.id);
-          setMessages((current) => mergeMessages(current, [payload.message]));
-          api.post(`/groups/${groupId}/chat/read/`).then(() => loadGroups()).catch((readError) => {
-            setError(displayError(readError, 'Unable to update the chat read status.'));
-          });
-        };
-      } catch {
-        if (live) handleConnectionFailure();
-      }
-    };
-    connect();
-    return () => {
-      live = false;
-      window.clearTimeout(socketTimeout);
-      window.clearTimeout(reconnectTimer);
-      window.clearInterval(pollingTimer);
-      socket?.close();
-      socketRef.current = null;
-    };
-  }, [groupId, loadWorkspace, loadGroups, user?.id, reconnectKey]);
+  }, [groupId, loadWorkspace]);
 
   useEffect(() => {
     setGroupForm({ name: selectedGroup?.name || '', description: selectedGroup?.description || '' });
@@ -503,18 +403,9 @@ export default function GroupsPage() {
     event.preventDefault();
     const text = messageText.trim();
     if (!text) return;
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ text }));
-      setMessageText('');
-      return;
-    }
     try {
       const { data } = await api.post(`/groups/${groupId}/chat/`, { text });
       setMessages((current) => mergeMessages(current, [data]));
-      if (data.delivery_status === 'polling') {
-        setConnection('polling');
-        setChatError('Message saved. Live delivery is temporarily unavailable; chat will sync by polling.');
-      }
       setMessageText('');
       setError('');
     } catch (sendError) {
@@ -546,7 +437,7 @@ export default function GroupsPage() {
     <div className="mx-auto max-w-7xl space-y-6">
       <header className="rounded-3xl bg-linear-to-br from-indigo-950 via-indigo-900 to-violet-800 p-6 text-white shadow-lg sm:p-8">
         <div className="flex items-center gap-3"><Users className="h-8 w-8 text-indigo-200" /><div><p className="text-sm text-indigo-200">Shared money, together</p><h1 className="text-3xl font-bold">Groups & chat</h1></div></div>
-        <p className="mt-3 max-w-2xl text-sm text-indigo-100">Plan shared spending, keep balances clear, and talk with your group in real time.</p>
+        <p className="mt-3 max-w-2xl text-sm text-indigo-100">Plan shared spending, keep balances clear, and leave messages for your group.</p>
       </header>
 
       {(error || groupsError || chatError || notice || joiningInvite) && <div role={joiningInvite ? 'status' : 'alert'} className={`rounded-xl border px-4 py-3 text-sm ${error || groupsError || chatError ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{joiningInvite ? 'Joining group invitation…' : error || groupsError || chatError || notice}{groupsError && <button type="button" disabled={groupsLoading} className="ml-3 font-semibold underline disabled:opacity-50" onClick={() => { setGroupsError(''); setGroupsLoading(true); setGroupsRetryKey((key) => key + 1); }}>{groupsLoading ? 'Retrying…' : 'Retry loading groups'}</button>}<button className="float-right font-semibold" onClick={() => { setError(''); setGroupsError(''); setChatError(''); setNotice(''); }}>Dismiss</button></div>}
@@ -648,7 +539,7 @@ export default function GroupsPage() {
               </div>
 
               <section className="flex min-h-105 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · <span className={connection === 'connected' ? 'text-emerald-600' : connection === 'fallback' ? 'text-rose-600' : 'text-amber-600'}>{connection === 'connected' ? 'live' : connection === 'fallback' ? 'backup mode · live server unavailable' : connection === 'polling' ? 'backup mode · retrying live connection' : connection}</span></p></div></div>{connection === 'fallback' && <button type="button" onClick={() => setReconnectKey((key) => key + 1)} className="rounded-lg border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">Retry live</button>}</header>
+                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · refresh to check for new messages</p></div></div><button type="button" onClick={refreshChat} disabled={chatRefreshing} className="flex items-center gap-1.5 rounded-lg border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${chatRefreshing ? 'animate-spin' : ''}`} />{chatRefreshing ? 'Refreshing…' : 'Refresh'}</button></header>
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
                   {olderBefore && <button onClick={loadOlderMessages} className="w-full rounded-lg bg-slate-50 py-2 text-xs font-medium text-indigo-700">Load older messages</button>}
                   {!messages.length && <p className="py-12 text-center text-sm text-slate-500">Start the conversation.</p>}

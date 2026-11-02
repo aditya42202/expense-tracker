@@ -134,17 +134,3 @@ class ChatMessage(models.Model):
                 name="groups_unique_shared_expense_message",
             ),
         ]
-
-
-class WebSocketTicket(models.Model):
-    id: int
-
-    token_hash = models.CharField(max_length=64, unique=True)
-    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="websocket_tickets")
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="group_websocket_tickets")
-    expires_at = models.DateTimeField()
-    used_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        indexes = [models.Index(fields=["expires_at", "used_at"], name="groups_ticket_expiry_idx")]

@@ -8,16 +8,11 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any, cast
 
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
 from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Count, F, OuterRef, Prefetch, Q, Subquery
-from asgiref.sync import async_to_sync
-from channels.exceptions import InvalidChannelLayerError
-from channels.layers import get_channel_layer
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
 from django.utils import timezone
-from redis.exceptions import RedisError
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -26,7 +21,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounts.models import User
-from .models import ChatMessage, ExpensePayment, ExpenseShare, Group, Membership, Settlement, SharedExpense, WebSocketTicket
+from .models import ChatMessage, ExpensePayment, ExpenseShare, Group, Membership, Settlement, SharedExpense
 from .serializers import ChatMessageSerializer, GroupSerializer, MembershipSerializer, SettlementSerializer
 
 CENT = Decimal("0.01")
@@ -583,31 +578,8 @@ class GroupChatView(APIView):
         else:
             raise ValidationError({"message_type": "Choose TEXT or EXPENSE."})
         serialized = cast(Mapping[str, Any], ChatMessageSerializer(message).data)
-        delivery_status = "polling"
-        try:
-            channel_layer = get_channel_layer()
-            if channel_layer is None:
-                logger.warning(
-                    "Chat channel layer unavailable for message_id=%s group_id=%s; message is persisted for polling",
-                    message.pk,
-                    group.pk,
-                )
-            else:
-                async_to_sync(channel_layer.group_send)(
-                    f"group_chat_{group.id}", {"type": "chat.message", "message": serialized},
-                )
-                delivery_status = "live"
-        except (RedisError, OSError, TimeoutError, InvalidChannelLayerError, ImproperlyConfigured, ImportError):
-            logger.exception(
-                "Failed to publish chat message_id=%s group_id=%s; message is persisted for polling",
-                message.pk,
-                group.pk,
-            )
         return Response(
-            {
-                **serialized,
-                "delivery_status": delivery_status,
-            },
+            serialized,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
@@ -621,17 +593,3 @@ class GroupChatReadView(APIView):
         membership.last_read_at = timezone.now()
         membership.save(update_fields=["last_read_at"])
         return Response({"last_read_at": membership.last_read_at})
-
-
-class GroupWebSocketTicketView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, group_id):
-        group = get_object_or_404(Group, pk=group_id)
-        group_membership(group, request.user)
-        WebSocketTicket.objects.filter(expires_at__lte=timezone.now()).delete()
-        token = secrets.token_urlsafe(32)
-        WebSocketTicket.objects.create(token_hash=hashlib.sha256(token.encode()).hexdigest(),
-                                       group=group, user=request.user,
-                                       expires_at=timezone.now() + timedelta(seconds=60))
-        return Response({"ticket": token, "expires_in": 60})

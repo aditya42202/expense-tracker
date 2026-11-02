@@ -14,7 +14,6 @@ from .views import (
     GroupSettlementsView,
     GroupsView,
     JoinGroupView,
-    GroupWebSocketTicketView,
 )
 
 urlpatterns = [
@@ -31,6 +30,5 @@ urlpatterns = [
     path("groups/<int:group_id>/settlements/<int:settlement_id>/settle/", GroupSettlementDetailView.as_view(), name="group-settlement-settle"),
     path("groups/<int:group_id>/chat/", GroupChatView.as_view(), name="group-chat"),
     path("groups/<int:group_id>/chat/read/", GroupChatReadView.as_view(), name="group-chat-read"),
-    path("groups/<int:group_id>/chat/ticket/", GroupWebSocketTicketView.as_view(), name="group-chat-ticket"),
     path("groups/<int:group_id>/ai-insights/", GroupAIInsightsView.as_view(), name="group-ai-insights"),
 ]
