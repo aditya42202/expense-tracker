@@ -295,13 +295,13 @@ export default function GroupExpenseShareDialog({ expense, money }) {
               </section>
 
               <div className="grid grid-cols-3 gap-2">
-                <button type="button" disabled={!confirmed} onClick={copyMessage} className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
+                <button type="button" disabled={!confirmed} onClick={copyMessage} className="flex min-h-17 flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
                   <Clipboard className="h-5 w-5 text-violet-600" />{t('Copy Message')}
                 </button>
-                <button type="button" disabled={!confirmed} onClick={shareReceipt} className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
+                <button type="button" disabled={!confirmed} onClick={shareReceipt} className="flex min-h-17 flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
                   <FileImage className="h-5 w-5 text-emerald-600" />{t('Share Receipt')}
                 </button>
-                <button type="button" onClick={() => setNoteOpen((current) => !current)} aria-expanded={noteOpen} className="flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
+                <button type="button" onClick={() => setNoteOpen((current) => !current)} aria-expanded={noteOpen} className="flex min-h-17 flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-1 text-xs font-semibold hover:bg-slate-50 dark:border-slate-700 dark:bg-[#1b2029] dark:hover:bg-slate-800">
                   <Pencil className="h-5 w-5 text-amber-500" />{t('Add Note')}
                 </button>
               </div>
