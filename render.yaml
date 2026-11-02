@@ -7,8 +7,8 @@ services:
     branch: main
     rootDir: expense-tracker/backend
     buildCommand: pip install -r requirements.txt
-    preDeployCommand: python manage.py migrate && python manage.py collectstatic --noinput
-    startCommand: daphne -b 0.0.0.0 -p $PORT config.asgi:application
+    preDeployCommand: python manage.py migrate --noinput && python manage.py collectstatic --noinput
+    startCommand: python manage.py migrate --noinput && daphne -b 0.0.0.0 -p $PORT config.asgi:application
     healthCheckPath: /api/health/
     envVars:
       - key: PYTHON_VERSION
