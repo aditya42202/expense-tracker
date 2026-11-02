@@ -3,7 +3,9 @@ from typing import Any, Protocol, cast
 from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
+from channels.exceptions import InvalidChannelLayerError
 from channels.testing import WebsocketCommunicator
+from django.db import DatabaseError
 from django.test import TransactionTestCase
 from django.utils import timezone
 from redis.exceptions import RedisError
@@ -332,6 +334,40 @@ class GroupAPITests(TransactionTestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["delivery_status"], "polling")
         self.assertTrue(ChatMessage.objects.filter(group=self.group, text=response.data["text"]).exists())
+
+    @patch("groups.views.get_channel_layer", return_value=None)
+    def test_chat_message_is_saved_when_channel_layer_is_not_configured(self, _get_channel_layer):
+        response = self.client.post(
+            f"/api/groups/{self.group.id}/chat/",
+            {"text": "Persist without a live channel layer"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["delivery_status"], "polling")
+        self.assertTrue(ChatMessage.objects.filter(group=self.group, text=response.data["text"]).exists())
+
+    @patch("groups.views.get_channel_layer", side_effect=InvalidChannelLayerError("invalid backend"))
+    def test_chat_message_is_saved_when_channel_layer_is_misconfigured(self, _get_channel_layer):
+        response = self.client.post(
+            f"/api/groups/{self.group.id}/chat/",
+            {"text": "Persist with an invalid channel backend"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["delivery_status"], "polling")
+        self.assertTrue(ChatMessage.objects.filter(group=self.group, text=response.data["text"]).exists())
+
+    @patch("groups.views.get_object_or_404", side_effect=DatabaseError("database unavailable"))
+    def test_chat_database_errors_return_safe_service_unavailable_response(self, _get_object):
+        response = self.client.get(f"/api/groups/{self.group.id}/chat/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.data["detail"],
+            "Group chat is temporarily unavailable. Please try again later.",
+        )
 
     @patch("expenses.ai_views._request_ai", return_value="Food spending is the largest category.")
     def test_group_ai_insights_use_authorized_group_data(self, request_ai):

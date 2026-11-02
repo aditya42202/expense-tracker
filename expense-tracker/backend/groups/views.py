@@ -6,9 +6,11 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Count, F, OuterRef, Prefetch, Q, Subquery
 from asgiref.sync import async_to_sync
+from channels.exceptions import InvalidChannelLayerError
 from channels.layers import get_channel_layer
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
@@ -520,13 +522,26 @@ class GroupSettlementDetailView(APIView):
 class GroupChatView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def handle_exception(self, exc):
+        if isinstance(exc, DatabaseError):
+            logger.exception(
+                "Database error while handling group chat request path=%s user_id=%s",
+                self.request.path,
+                self.request.user.pk if self.request.user.is_authenticated else None,
+            )
+            return Response(
+                {"detail": "Group chat is temporarily unavailable. Please try again later."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return super().handle_exception(exc)
+
     def get(self, request, group_id):
         group = get_object_or_404(Group, pk=group_id)
         group_membership(group, request.user)
         try:
             limit = min(max(int(request.query_params.get("limit", 50)), 1), 100)
             before = int(request.query_params["before"]) if request.query_params.get("before") else None
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             raise ValidationError({"pagination": "before and limit must be integers."}) from exc
         queryset = group.messages.select_related("sender")
         if before:
@@ -566,24 +581,29 @@ class GroupChatView(APIView):
         else:
             raise ValidationError({"message_type": "Choose TEXT or EXPENSE."})
         serialized = ChatMessageSerializer(message).data
-        channel_layer = get_channel_layer()
-        if channel_layer is None:
-            raise RuntimeError("The group chat channel layer is not configured.")
-        delivery_status = "live"
+        delivery_status = "polling"
         try:
-            async_to_sync(channel_layer.group_send)(
-                f"group_chat_{group.id}", {"type": "chat.message", "message": serialized},
-            )
-        except (RedisError, OSError, TimeoutError):
+            channel_layer = get_channel_layer()
+            if channel_layer is None:
+                logger.warning(
+                    "Chat channel layer unavailable for message_id=%s group_id=%s; message is persisted for polling",
+                    message.pk,
+                    group.pk,
+                )
+            else:
+                async_to_sync(channel_layer.group_send)(
+                    f"group_chat_{group.id}", {"type": "chat.message", "message": serialized},
+                )
+                delivery_status = "live"
+        except (RedisError, OSError, TimeoutError, InvalidChannelLayerError, ImproperlyConfigured, ImportError):
             logger.exception(
                 "Failed to publish chat message_id=%s group_id=%s; message is persisted for polling",
                 message.pk,
                 group.pk,
             )
-            delivery_status = "polling"
         return Response(
             {
-                **serialized,
+                # **serialized,
                 "delivery_status": delivery_status,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -610,5 +630,6 @@ class GroupWebSocketTicketView(APIView):
         WebSocketTicket.objects.filter(expires_at__lte=timezone.now()).delete()
         token = secrets.token_urlsafe(32)
         WebSocketTicket.objects.create(token_hash=hashlib.sha256(token.encode()).hexdigest(),
-                                       group=group, user=request.user, expires_at=timezone.now() + timedelta(seconds=60))
+                                       group=group, user=request.user,
+                                       expires_at=timezone.now() + timedelta(seconds=60))
         return Response({"ticket": token, "expires_in": 60})
