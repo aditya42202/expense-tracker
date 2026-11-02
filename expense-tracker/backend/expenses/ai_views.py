@@ -120,7 +120,11 @@ def _request_ai(system_prompt, user_payload):
         provider_error = error_data.get("error", {}) if isinstance(error_data, dict) else {}
         provider_code = provider_error.get("code") if isinstance(provider_error, dict) else None
         provider_type = provider_error.get("type") if isinstance(provider_error, dict) else None
-        if provider_code == "insufficient_quota":
+        if provider_code in {
+            "insufficient_quota",
+            "billing_hard_limit_reached",
+            "usage_limit_reached",
+        } or provider_type == "insufficient_quota":
             error_code = "insufficient_quota"
         elif provider_code == "invalid_api_key" or error.code in (401, 403):
             error_code = "invalid_api_key"

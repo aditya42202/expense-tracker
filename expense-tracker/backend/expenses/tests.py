@@ -408,6 +408,13 @@ class ExpenseApiTests(TestCase):
                 "quota",
             ),
             (
+                429,
+                {"error": {"code": "billing_hard_limit_reached", "type": "insufficient_quota"}},
+                503,
+                "ai_insufficient_quota",
+                "quota",
+            ),
+            (
                 404,
                 {"error": {"code": "model_not_found"}},
                 503,
