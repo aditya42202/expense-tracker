@@ -603,7 +603,7 @@ class GroupChatView(APIView):
             )
         return Response(
             {
-                # **serialized,
+                **serialized,
                 "delivery_status": delivery_status,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
