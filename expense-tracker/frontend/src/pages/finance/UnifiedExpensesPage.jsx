@@ -134,7 +134,7 @@ export default function UnifiedExpensesPage() {
   };
 
   return (
-    <div className="mx-auto max-w-[1440px] space-y-6">
+    <div className="mx-auto max-w-360 space-y-6">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="text-sm font-semibold text-[#287253]">{t('Expense workspace')}</p>

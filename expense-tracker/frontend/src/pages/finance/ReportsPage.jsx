@@ -207,7 +207,7 @@ export default function ReportsPage() {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-sm">
+          <table className="w-full min-w-225 text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
                 {['Sr no', "Person's name", "Person's expenses", 'Expense description', 'Amount to pay', 'Who pays whom'].map((heading) => (

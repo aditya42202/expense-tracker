@@ -64,7 +64,7 @@ export default function Layout({ children }) {
         <aside className="hidden w-72 shrink-0 bg-slate-950 text-slate-100 md:flex md:flex-col">
           <div className="border-b border-white/10 px-6 py-7">
             <div className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 shadow-lg shadow-indigo-950/40">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-linear-to-br from-indigo-500 to-violet-500 shadow-lg shadow-indigo-950/40">
                 <Wallet className="h-5 w-5" />
               </span>
               <div>
@@ -145,7 +145,7 @@ export default function Layout({ children }) {
                 </button>
 
                 <NavLink to="/profile" aria-label={t('Open full profile')} className="hidden items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-indigo-200 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 xl:flex">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-semibold text-white">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-linear-to-br from-indigo-500 to-violet-600 text-sm font-semibold text-white">
                     {user?.name?.charAt(0)?.toUpperCase() || 'U'}
                   </div>
                   <div className="text-left">

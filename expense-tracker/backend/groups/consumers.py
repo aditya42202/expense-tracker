@@ -1,5 +1,4 @@
 import hashlib
-import json
 from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
@@ -42,7 +41,13 @@ def has_active_membership(group_id, user):
 
 class GroupChatConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
-        self.group_id = int(self.scope["url_route"]["kwargs"]["group_id"])
+        url_route = self.scope.get("url_route")
+        route_kwargs = url_route.get("kwargs") if url_route else None
+        group_id = route_kwargs.get("group_id") if route_kwargs else None
+        if group_id is None:
+            await self.close(code=4404)
+            return
+        self.group_id = int(group_id)
         query = parse_qs(self.scope["query_string"].decode())
         tickets = query.get("ticket", [])
         user = await consume_ticket(tickets[0], self.group_id) if tickets else None
@@ -54,11 +59,13 @@ class GroupChatConsumer(AsyncJsonWebsocketConsumer):
         await self.channel_layer.group_add(self.channel_group_name, self.channel_name)
         await self.accept()
 
-    async def disconnect(self, close_code):
+    async def disconnect(self, _close_code):
+        del _close_code
         if hasattr(self, "channel_group_name"):
             await self.channel_layer.group_discard(self.channel_group_name, self.channel_name)
 
-    async def receive_json(self, content, **kwargs):
+    async def receive_json(self, content, **_kwargs):
+        del _kwargs
         text = str(content.get("text", "")).strip() if isinstance(content, dict) else ""
         if not text or len(text) > 2000:
             await self.send_json({"type": "error", "message": "Message must contain 1–2000 characters."})

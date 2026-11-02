@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import ChatMessage, Group, Membership, Settlement, SharedExpense
+from .models import ChatMessage, Group, Membership, Settlement
 
 
 class MembershipSerializer(serializers.ModelSerializer):

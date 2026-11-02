@@ -1,8 +1,16 @@
+from __future__ import annotations
+
 from django.conf import settings
 from django.db import models
 
 
 class Group(models.Model):
+    id: int
+    memberships: models.Manager
+    expenses: models.Manager
+    settlements: models.Manager
+    messages: models.Manager
+
     name = models.CharField(max_length=120)
     description = models.TextField(blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_groups")
@@ -16,6 +24,8 @@ class Group(models.Model):
 
 
 class Membership(models.Model):
+    id: int
+
     ROLE_CHOICES = [("admin", "Admin"), ("member", "Member")]
 
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="memberships")
@@ -31,6 +41,10 @@ class Membership(models.Model):
 
 
 class SharedExpense(models.Model):
+    id: int
+    shares: models.Manager
+    payments: models.Manager
+
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="expenses")
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="shared_expenses_created")
     title = models.CharField(max_length=200)
@@ -46,6 +60,9 @@ class SharedExpense(models.Model):
 
 
 class ExpenseShare(models.Model):
+    id: int
+    membership_id: int
+
     expense = models.ForeignKey(SharedExpense, on_delete=models.CASCADE, related_name="shares")
     membership = models.ForeignKey(Membership, on_delete=models.CASCADE, related_name="shares")
     amount = models.DecimalField(max_digits=12, decimal_places=2)
@@ -56,6 +73,9 @@ class ExpenseShare(models.Model):
 
 
 class ExpensePayment(models.Model):
+    id: int
+    membership_id: int
+
     expense = models.ForeignKey(SharedExpense, on_delete=models.CASCADE, related_name="payments")
     membership = models.ForeignKey(Membership, on_delete=models.CASCADE, related_name="payments")
     amount = models.DecimalField(max_digits=12, decimal_places=2)
@@ -65,6 +85,10 @@ class ExpensePayment(models.Model):
 
 
 class Settlement(models.Model):
+    id: int
+    from_membership_id: int
+    to_membership_id: int
+
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="settlements")
     from_membership = models.ForeignKey(Membership, on_delete=models.CASCADE, related_name="sent_settlements")
     to_membership = models.ForeignKey(Membership, on_delete=models.CASCADE, related_name="received_settlements")
@@ -79,6 +103,8 @@ class Settlement(models.Model):
 
 
 class ChatMessage(models.Model):
+    id: int
+
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="group_messages")
     text = models.CharField(max_length=2000)
@@ -89,6 +115,8 @@ class ChatMessage(models.Model):
 
 
 class WebSocketTicket(models.Model):
+    id: int
+
     token_hash = models.CharField(max_length=64, unique=True)
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="websocket_tickets")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="group_websocket_tickets")

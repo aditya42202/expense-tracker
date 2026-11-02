@@ -109,7 +109,7 @@ export default function GroupExpensePage({ onExpenseChange = () => {} }) {
   ].join('\n');
 
   return (
-    <div className="mx-auto max-w-[1440px] space-y-6">
+    <div className="mx-auto max-w-360 space-y-6">
       <div className="rounded-2xl bg-[#173d32] p-6 text-white shadow-sm sm:p-8">
         <p className="text-sm font-medium text-emerald-100/75">{t('Shared money, made clear')}</p>
         <div className="mt-2 flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><h1 className="text-3xl font-semibold">{t('Group expenses')}</h1><p className="mt-2 max-w-xl text-sm text-emerald-100/70">{t('Split fairly, then see exactly who pays whom.')}</p></div><Users className="h-10 w-10 text-emerald-200/70" /></div>

@@ -222,7 +222,7 @@ class GroupMembersView(APIView):
         if target.role == "admin" and group.memberships.filter(role="admin", is_active=True).count() == 1:
             raise ValidationError("A group must have at least one admin.")
         if ExpensePayment.objects.filter(membership=target).exists() or ExpenseShare.objects.filter(membership=target).exists():
-            members, balances = group_net_balances(group)
+            _, balances = group_net_balances(group)
             if balances[target.id] != 0:
                 raise ValidationError("This member must settle their group balance before leaving.")
         target.is_active = False
@@ -273,7 +273,7 @@ class GroupExpensesView(APIView):
     def post(self, request, group_id):
         group = get_object_or_404(Group, pk=group_id)
         group_membership(group, request.user)
-        payload, amount, shares, payments = validate_expense_payload(group, request.user, request.data)
+        payload, _, shares, payments = validate_expense_payload(group, request.user, request.data)
         with transaction.atomic():
             expense = SharedExpense.objects.create(group=group, created_by=request.user, **payload)
             ExpenseShare.objects.bulk_create([ExpenseShare(expense=expense, membership=member, amount=share, percentage=percentage)
@@ -450,7 +450,10 @@ class GroupChatView(APIView):
             raise ValidationError({"text": "Message must contain 1–2000 characters."})
         message = ChatMessage.objects.create(group=group, sender=request.user, text=text)
         serialized = ChatMessageSerializer(message).data
-        async_to_sync(get_channel_layer().group_send)(
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            raise RuntimeError("The group chat channel layer is not configured.")
+        async_to_sync(channel_layer.group_send)(
             f"group_chat_{group.id}", {"type": "chat.message", "message": serialized},
         )
         return Response(serialized, status=status.HTTP_201_CREATED)

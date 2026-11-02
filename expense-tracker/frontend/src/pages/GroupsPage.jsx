@@ -302,7 +302,7 @@ export default function GroupsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <header className="rounded-3xl bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-800 p-6 text-white shadow-lg sm:p-8">
+      <header className="rounded-3xl bg-linear-to-br from-indigo-950 via-indigo-900 to-violet-800 p-6 text-white shadow-lg sm:p-8">
         <div className="flex items-center gap-3"><Users className="h-8 w-8 text-indigo-200" /><div><p className="text-sm text-indigo-200">Shared money, together</p><h1 className="text-3xl font-bold">Groups & chat</h1></div></div>
         <p className="mt-3 max-w-2xl text-sm text-indigo-100">Plan shared spending, keep balances clear, and talk with your group in real time.</p>
       </header>
@@ -377,12 +377,12 @@ export default function GroupsPage() {
                 <div className="mt-4 space-y-2">{settlements.map((settlement) => <div key={settlement.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 p-3 text-sm"><span>{settlement.from_member.name} → {settlement.to_member.name} · {money.format(Number(settlement.amount))}<span className="ml-2 text-xs text-slate-500">{settlement.is_settled ? 'Settled' : 'Pending'}</span></span>{!settlement.is_settled && <button onClick={() => markSettled(settlement.id)} className="rounded-lg border border-emerald-200 px-2 py-1 text-xs text-emerald-700">Mark paid</button>}</div>)}</div>
               </div>
 
-              <section className="flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <section className="flex min-h-105 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · <span className={connection === 'connected' ? 'text-emerald-600' : 'text-amber-600'}>{connection}</span></p></div></div></header>
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
                   {olderBefore && <button onClick={loadOlderMessages} className="w-full rounded-lg bg-slate-50 py-2 text-xs font-medium text-indigo-700">Load older messages</button>}
                   {!messages.length && <p className="py-12 text-center text-sm text-slate-500">Start the conversation.</p>}
-                  {messages.map((message) => <div key={message.id} className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm ${message.sender_id === user?.id ? 'ml-auto bg-indigo-600 text-white' : 'bg-slate-100 text-slate-800'}`}><p className="mb-1 text-xs font-semibold opacity-75">{message.sender_name}</p><p className="whitespace-pre-wrap break-words">{message.text}</p><time className="mt-1 block text-right text-[10px] opacity-70">{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>)}
+                  {messages.map((message) => <div key={message.id} className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm ${message.sender_id === user?.id ? 'ml-auto bg-indigo-600 text-white' : 'bg-slate-100 text-slate-800'}`}><p className="mb-1 text-xs font-semibold opacity-75">{message.sender_name}</p><p className="whitespace-pre-wrap wrap-break-word">{message.text}</p><time className="mt-1 block text-right text-[10px] opacity-70">{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>)}
                 </div>
                 <form onSubmit={sendMessage} className="flex gap-2 border-t border-slate-100 p-3"><input maxLength={2000} value={messageText} onChange={(event) => setMessageText(event.target.value)} placeholder="Write a message…" className="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2" /><button disabled={connection !== 'connected' || !messageText.trim()} aria-label="Send message" className="rounded-xl bg-indigo-600 px-4 text-white disabled:opacity-40"><Send className="h-4 w-4" /></button></form>
               </section>

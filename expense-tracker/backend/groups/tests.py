@@ -1,3 +1,5 @@
+from typing import Any, Protocol, cast
+
 from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
 from django.test import TransactionTestCase
@@ -8,6 +10,30 @@ from config.asgi import application
 from .models import ChatMessage, ExpenseShare, Group, Membership, SharedExpense
 
 
+class APIResponse(Protocol):
+    status_code: int
+    data: Any
+
+    def __getitem__(self, key: str) -> str: ...
+
+
+class TypedAPIClient(APIClient):
+    def get(self, *args: Any, **kwargs: Any) -> APIResponse:
+        return cast(APIResponse, super().get(*args, **kwargs))
+
+    def post(self, *args: Any, **kwargs: Any) -> APIResponse:
+        return cast(APIResponse, super().post(*args, **kwargs))
+
+    def patch(self, *args: Any, **kwargs: Any) -> APIResponse:
+        return cast(APIResponse, super().patch(*args, **kwargs))
+
+    def delete(self, *args: Any, **kwargs: Any) -> APIResponse:
+        return cast(APIResponse, super().delete(*args, **kwargs))
+
+    def options(self, *args: Any, **kwargs: Any) -> APIResponse:
+        return cast(APIResponse, super().options(*args, **kwargs))
+
+
 class GroupAPITests(TransactionTestCase):
     reset_sequences = True
 
@@ -15,7 +41,7 @@ class GroupAPITests(TransactionTestCase):
         self.owner = User.objects.create_user(email="owner@example.test", password="password-123", name="Owner", is_active=True)
         self.member = User.objects.create_user(email="member@example.test", password="password-123", name="Member", is_active=True)
         self.outsider = User.objects.create_user(email="other@example.test", password="password-123", name="Outsider", is_active=True)
-        self.client = APIClient()
+        self.client: TypedAPIClient = TypedAPIClient()
         self.client.force_authenticate(self.owner)
         response = self.client.post("/api/groups/", {"name": "Trip", "description": "Weekend"}, format="json")
         self.assertEqual(response.status_code, 201)
