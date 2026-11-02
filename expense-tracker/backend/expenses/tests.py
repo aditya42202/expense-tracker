@@ -3,6 +3,7 @@ import json
 from datetime import date
 from datetime import timedelta
 from decimal import Decimal
+from email.message import Message
 from io import BytesIO
 from typing import Any, cast
 from urllib.error import HTTPError
@@ -435,7 +436,7 @@ class ExpenseApiTests(TestCase):
                     "https://api.openai.com/v1/chat/completions",
                     provider_status,
                     "Provider error",
-                    {},
+                    Message(),
                     BytesIO(json.dumps(provider_body).encode()),
                 )
                 with (
