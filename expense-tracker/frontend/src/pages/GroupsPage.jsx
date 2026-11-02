@@ -34,8 +34,11 @@ export default function GroupsPage() {
   const [messageText, setMessageText] = useState('');
   const [connection, setConnection] = useState('connecting');
   const [reconnectKey, setReconnectKey] = useState(0);
+  const [groupsRetryKey, setGroupsRetryKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [groupsError, setGroupsError] = useState('');
+  const [chatError, setChatError] = useState('');
   const [notice, setNotice] = useState('');
   const socketRef = useRef(null);
   const selectedGroup = useMemo(() => groups.find((group) => String(group.id) === String(groupId)), [groups, groupId]);
@@ -47,12 +50,15 @@ export default function GroupsPage() {
     const { data } = await api.get('/groups/');
     setGroups(data);
     setGroupId((current) => current && data.some((group) => String(group.id) === String(current)) ? current : String(data[0]?.id || ''));
+    setGroupsError('');
     return data;
   }, []);
 
   useEffect(() => {
     let active = true;
-    loadGroups().catch(() => active && setError('Unable to load groups.')).finally(() => active && setLoading(false));
+    loadGroups()
+      .catch((loadError) => active && setGroupsError(displayError(loadError, 'Unable to load groups.')))
+      .finally(() => active && setLoading(false));
     const token = searchParams.get('invite');
     if (token) {
       api.post('/groups/join/', { token }).then(({ data }) => {
@@ -63,7 +69,7 @@ export default function GroupsPage() {
       }).catch((joinError) => active && setError(displayError(joinError, 'Unable to join this group.')));
     }
     return () => { active = false; };
-  }, [loadGroups, searchParams, setSearchParams]);
+  }, [groupsRetryKey, loadGroups, searchParams, setSearchParams]);
 
   const loadWorkspace = useCallback(async (id) => {
     if (!id) return;
@@ -102,6 +108,10 @@ export default function GroupsPage() {
       try {
         const { data } = await api.get(`/groups/${groupId}/chat/?limit=50`);
         if (!live) return;
+        setChatError('');
+        setConnection((current) => (
+          current === 'disconnected' ? (failedAttempts > 3 ? 'fallback' : 'polling') : current
+        ));
         const hasUnreadMessages = data.results.some(
           (message) => message.id > latestMessageId && message.sender_id !== user?.id,
         );
@@ -119,7 +129,7 @@ export default function GroupsPage() {
       } catch (pollError) {
         if (live) {
           setConnection('disconnected');
-          setError(displayError(pollError, 'Unable to sync group chat. Check the connection and try again.'));
+          setChatError(displayError(pollError, 'Unable to sync group chat. Check the connection and try again.'));
         }
       }
     };
@@ -169,7 +179,7 @@ export default function GroupsPage() {
           if (!live) return;
           window.clearTimeout(socketTimeout);
           setConnection('connected');
-          setError('');
+          setChatError('');
           failedAttempts = 0;
           retryDelay = 1000;
           window.clearInterval(pollingTimer);
@@ -439,7 +449,7 @@ export default function GroupsPage() {
         <p className="mt-3 max-w-2xl text-sm text-indigo-100">Plan shared spending, keep balances clear, and talk with your group in real time.</p>
       </header>
 
-      {(error || notice) && <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{error || notice}<button className="float-right font-semibold" onClick={() => { setError(''); setNotice(''); }}>Dismiss</button></div>}
+      {(error || groupsError || chatError || notice) && <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${error || groupsError || chatError ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{error || groupsError || chatError || notice}{groupsError && <button type="button" className="ml-3 font-semibold underline" onClick={() => { setGroupsError(''); setLoading(true); setGroupsRetryKey((key) => key + 1); }}>Retry loading groups</button>}<button className="float-right font-semibold" onClick={() => { setError(''); setGroupsError(''); setChatError(''); setNotice(''); }}>Dismiss</button></div>}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(240px,0.7fr)_minmax(0,2fr)]">
         <aside className="space-y-4">
