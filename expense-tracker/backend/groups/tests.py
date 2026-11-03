@@ -239,6 +239,46 @@ class GroupAPITests(TransactionTestCase):
         self.assertEqual(self.client.post(url, {"text": "Not a member"}, format="json").status_code, 404)
         self.assertEqual(self.client.post(f"{url}read/").status_code, 404)
 
+    @patch("groups.views.time.sleep")
+    def test_chat_long_poll_returns_new_messages_after_zero_cursor(self, sleep):
+        def create_message(_seconds):
+            ChatMessage.objects.create(group=self.group, sender=self.owner, text="New message")
+
+        sleep.side_effect = create_message
+
+        response = self.client.get(f"/api/groups/{self.group.id}/chat/?after=0&wait=20")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([message["text"] for message in response.data["results"]], ["New message"])
+        sleep.assert_called_once_with(1)
+
+    @patch("groups.views.time.sleep")
+    @patch("groups.views.time.monotonic", side_effect=[0, 0, 21])
+    def test_chat_long_poll_times_out_with_empty_results_and_caps_wait(self, _monotonic, sleep):
+        response = self.client.get(f"/api/groups/{self.group.id}/chat/?after=0&wait=999")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"], [])
+        self.assertFalse(response.data["has_more"])
+        sleep.assert_called_once_with(1)
+
+    def test_chat_long_poll_rejects_invalid_wait_parameters(self):
+        url = f"/api/groups/{self.group.id}/chat/"
+
+        self.assertEqual(self.client.get(f"{url}?after=0&wait=invalid").status_code, 400)
+        self.assertEqual(self.client.get(f"{url}?wait=1").status_code, 400)
+
+    @patch("groups.views.time.sleep")
+    def test_chat_long_poll_rechecks_membership_while_waiting(self, sleep):
+        sleep.side_effect = lambda _seconds: Membership.objects.filter(
+            group=self.group,
+            user=self.owner,
+        ).update(is_active=False)
+
+        response = self.client.get(f"/api/groups/{self.group.id}/chat/?after=0&wait=20")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_expense_chat_message_is_structured_and_idempotent(self):
         created = self.client.post(f"/api/groups/{self.group.id}/expenses/", {
             "title": "Dinner", "amount": "30.00", "date": timezone.localdate().isoformat(),

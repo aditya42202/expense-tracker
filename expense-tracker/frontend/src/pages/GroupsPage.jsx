@@ -86,6 +86,13 @@ export default function GroupsPage() {
   const visibleMessages = chatMessagesGroupId === String(groupId) ? messages : [];
   const visibleOlderBefore = chatMessagesGroupId === String(groupId) ? olderBefore : null;
   const lastMessageId = visibleMessages[visibleMessages.length - 1]?.id;
+  const lastMessageIdRef = useRef(lastMessageId);
+  const chatMessagesGroupIdRef = useRef(chatMessagesGroupId);
+
+  useEffect(() => {
+    lastMessageIdRef.current = lastMessageId;
+    chatMessagesGroupIdRef.current = chatMessagesGroupId;
+  }, [chatMessagesGroupId, lastMessageId]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -203,21 +210,25 @@ export default function GroupsPage() {
 
   const refreshChat = useCallback(async (manual = false) => {
     const id = groupId;
-    if (!id) return;
-    const after = lastMessageId;
-    if (!after) return loadChat(id);
-    if (chatRequestRef.current) return;
+    if (!id) return false;
+    if (chatMessagesGroupIdRef.current !== String(id)) {
+      await loadChat(id);
+      return true;
+    }
+    const after = lastMessageIdRef.current || 0;
+    if (chatRequestRef.current) return false;
     const controller = new AbortController();
     chatRequestRef.current = controller;
     if (manual) setChatRefreshingGroupId(String(id));
     try {
-      const { data } = await api.get(`/groups/${id}/chat/?after=${after}&limit=100`, {
+      const { data } = await api.get(`/groups/${id}/chat/?after=${after}&limit=100&wait=${manual ? 0 : 20}`, {
         signal: controller.signal,
+        timeout: 30000,
       });
-      if (groupIdRef.current !== String(id)) return;
+      if (groupIdRef.current !== String(id)) return false;
       if (data.results.length) {
         setMessages((current) => mergeMessages(
-          chatMessagesGroupId === String(id) ? current : [],
+          chatMessagesGroupIdRef.current === String(id) ? current : [],
           data.results,
         ));
         setChatMessagesGroupId(String(id));
@@ -229,6 +240,7 @@ export default function GroupsPage() {
         }
       }
       setChatErrorState({ groupId: String(id), message: '' });
+      return true;
     } catch (refreshError) {
       if (!controller.signal.aborted && groupIdRef.current === String(id)) {
         setChatErrorState({
@@ -236,11 +248,12 @@ export default function GroupsPage() {
           message: displayError(refreshError, 'Unable to refresh group chat. Check the connection and retry.'),
         });
       }
+      return false;
     } finally {
       if (chatRequestRef.current === controller) chatRequestRef.current = null;
       if (manual && groupIdRef.current === String(id)) setChatRefreshingGroupId('');
     }
-  }, [chatMessagesGroupId, groupId, lastMessageId, loadChat]);
+  }, [groupId, loadChat]);
 
   useEffect(() => {
     if (!groupId) return undefined;
@@ -255,10 +268,23 @@ export default function GroupsPage() {
   }, [groupId, loadChat, loadWorkspace]);
 
   useEffect(() => {
-    if (!groupId) return undefined;
-    const intervalId = window.setInterval(() => { refreshChat(); }, 3000);
-    return () => window.clearInterval(intervalId);
-  }, [groupId, refreshChat]);
+    if (!groupId || chatMessagesGroupId !== String(groupId)) return undefined;
+    let active = true;
+    let timeoutId;
+    const poll = async () => {
+      const succeeded = await refreshChat();
+      if (active) timeoutId = window.setTimeout(poll, succeeded ? 0 : 3000);
+    };
+    poll();
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+      if (chatRequestRef.current) {
+        chatRequestRef.current.abort();
+        chatRequestRef.current = null;
+      }
+    };
+  }, [chatMessagesGroupId, groupId, refreshChat]);
 
   useEffect(() => {
     setGroupForm({ name: selectedGroup?.name || '', description: selectedGroup?.description || '' });
@@ -668,7 +694,7 @@ export default function GroupsPage() {
               </div>
 
               <section className="flex min-h-105 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · updates every 3 seconds</p></div></div><button type="button" onClick={() => refreshChat(true)} disabled={chatRefreshing || chatLoading} className="flex items-center gap-1.5 rounded-lg border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${chatRefreshing ? 'animate-spin' : ''}`} />{chatRefreshing ? 'Refreshing…' : 'Refresh'}</button></header>
+                <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><MessageCircle className="h-5 w-5 text-indigo-600" /><div><h2 className="font-semibold">Group chat</h2><p className="text-xs text-slate-500">Messages are saved · live updates use HTTP long polling</p></div></div><button type="button" onClick={() => refreshChat(true)} disabled={chatRefreshing || chatLoading} className="flex items-center gap-1.5 rounded-lg border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${chatRefreshing ? 'animate-spin' : ''}`} />{chatRefreshing ? 'Refreshing…' : 'Refresh'}</button></header>
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
                   {chatError && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{chatError} <button type="button" onClick={() => loadChat(groupId)} disabled={chatLoading} className="ml-2 font-semibold underline">{chatLoading ? 'Retrying…' : 'Retry'}</button></div>}
                   {visibleOlderBefore && <button onClick={loadOlderMessages} disabled={olderLoading} className="w-full rounded-lg bg-slate-50 py-2 text-xs font-medium text-indigo-700 disabled:opacity-50">{olderLoading ? 'Loading older messages…' : 'Load older messages'}</button>}

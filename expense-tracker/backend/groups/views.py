@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import logging
 import secrets
+import time
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 
@@ -12,7 +13,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -24,6 +25,8 @@ from .serializers import ChatMessageSerializer, GroupSerializer, MembershipSeria
 
 CENT = Decimal("0.01")
 MAX_AMOUNT = Decimal("9999999999.99")
+MAX_CHAT_WAIT_SECONDS = 20
+CHAT_POLL_INTERVAL_SECONDS = 1
 logger = logging.getLogger(__name__)
 
 
@@ -539,14 +542,21 @@ class GroupChatView(APIView):
             limit = min(max(int(request.query_params.get("limit", 50)), 1), 100)
             before_value = request.query_params.get("before")
             after_value = request.query_params.get("after")
+            wait_value = request.query_params.get("wait")
             before = int(before_value) if before_value else None
             after = int(after_value) if after_value else None
+            wait_seconds = min(
+                max(int(wait_value), 0),
+                MAX_CHAT_WAIT_SECONDS,
+            ) if wait_value is not None else (MAX_CHAT_WAIT_SECONDS if after is not None else 0)
         except (TypeError, ValueError) as exc:
-            raise ValidationError({"pagination": "before, after, and limit must be integers."}) from exc
-        if (before is not None and before < 1) or (after is not None and after < 1):
-            raise ValidationError({"pagination": "before and after must be positive message IDs."})
+            raise ValidationError({"pagination": "before, after, limit, and wait must be integers."}) from exc
+        if (before is not None and before < 1) or (after is not None and after < 0):
+            raise ValidationError({"pagination": "before must be positive and after must be non-negative."})
         if before is not None and after is not None:
             raise ValidationError({"pagination": "Use either before or after, not both."})
+        if wait_value is not None and after is None:
+            raise ValidationError({"pagination": "wait can only be used with an after cursor."})
 
         queryset = group.messages.select_related("sender", "expense")
         next_before = None
@@ -559,7 +569,23 @@ class GroupChatView(APIView):
             messages.reverse()
             next_before = messages[0].id if messages and has_more else None
         elif after is not None:
-            messages = list(queryset.filter(id__gt=after).order_by("id")[:limit + 1])
+            new_messages = queryset.filter(id__gt=after).order_by("id")
+            if wait_seconds and not new_messages.exists():
+                deadline = time.monotonic() + wait_seconds
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    time.sleep(min(CHAT_POLL_INTERVAL_SECONDS, remaining))
+                    if not Membership.objects.filter(
+                        group_id=group.pk,
+                        user_id=request.user.pk,
+                        is_active=True,
+                    ).exists():
+                        raise NotFound("This group could not be found.")
+                    if new_messages.exists():
+                        break
+            messages = list(new_messages[:limit + 1])
             has_more = len(messages) > limit
             messages = messages[:limit]
             next_after = messages[-1].id if messages and has_more else None

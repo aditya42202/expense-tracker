@@ -1,1 +1,1 @@
-web: python manage.py migrate --noinput && python -m daphne -b 0.0.0.0 -p $PORT config.asgi:application
+web: python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --worker-class gthread --workers 2 --threads 4 --timeout 35
