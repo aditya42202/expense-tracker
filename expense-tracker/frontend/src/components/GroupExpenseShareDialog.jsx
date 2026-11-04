@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowRightLeft, Check, Clipboard, FileImage, MessageCircle, Pencil, Users, X } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { sanitizeShareText } from '../services/shareText';
 
 const avatarColors = [
   'bg-violet-500',
@@ -39,7 +40,7 @@ function createReceiptImage(expense, people, money, date, paidBy) {
   context.setLineDash([]);
 
   const details = [
-    ['Expense', expense.title],
+    ['Expense', sanitizeShareText(expense.title)],
     ['Date', date],
     ['Paid by', paidBy],
   ];
@@ -49,7 +50,7 @@ function createReceiptImage(expense, people, money, date, paidBy) {
     context.fillStyle = '#64748b';
     context.fillText(label, 56, y);
     context.fillStyle = '#0f172a';
-    context.fillText(String(value).slice(0, 42), 220, y);
+    context.fillText(sanitizeShareText(value).slice(0, 42), 220, y);
   });
 
   const tableTop = 318;
@@ -66,7 +67,7 @@ function createReceiptImage(expense, people, money, date, paidBy) {
     const y = tableTop + 72 + index * 52;
     context.fillStyle = '#0f172a';
     context.font = '18px Arial';
-    context.fillText(String(person.name).slice(0, 42), 64, y);
+    context.fillText(sanitizeShareText(person.name).slice(0, 42), 64, y);
     context.textAlign = 'right';
     context.fillText(money.format(Number(person.share)), canvas.width - 64, y);
     context.textAlign = 'left';
@@ -94,7 +95,7 @@ function createReceiptImage(expense, people, money, date, paidBy) {
     settlements.forEach((transfer, index) => {
       const y = settlementTop + 32 + index * 36;
       context.fillStyle = '#334155';
-      context.fillText(`${transfer.from} → ${transfer.to}`, 64, y);
+      context.fillText(`${sanitizeShareText(transfer.from)} -> ${sanitizeShareText(transfer.to)}`, 64, y);
       context.textAlign = 'right';
       context.fillText(money.format(Number(transfer.amount)), canvas.width - 64, y);
       context.textAlign = 'left';
@@ -125,48 +126,48 @@ export default function GroupExpenseShareDialog({ expense, money }) {
 
   const people = expense.participant_details || [];
   const settlements = expense.settlements || [];
-  const paidBy = people.filter((person) => Number(person.paid) > 0).map((person) => person.name).join(', ') || t('Not specified');
+  const paidBy = people.filter((person) => Number(person.paid) > 0).map((person) => sanitizeShareText(person.name)).join(', ') || t('Not specified');
   const date = expense.date
     ? new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(`${expense.date}T00:00:00`))
     : '-';
   const expenseMessage = [
-    '◆ MoneyMind Group Expense',
+    '[GROUP EXPENSE] MoneyMind',
     '',
-    `● Group: ${t('Shared expenses')}`,
-    `◆ Expense: ${expense.title}`,
-    `₹ Total: ${money.format(Number(expense.amount))}`,
-    `◆ Date: ${date}`,
-    `● Paid By: ${paidBy}`,
+    `[GROUP] ${t('Shared expenses')}`,
+    `[EXPENSE] ${sanitizeShareText(expense.title)}`,
+    `[TOTAL] ${money.format(Number(expense.amount))}`,
+    `[DATE] ${date}`,
+    `[PAID BY] ${paidBy}`,
     '',
-    '◆ Member-wise Breakdown:',
-    ...people.map((person) => `${person.name}: ${money.format(Number(person.share))}`),
+    '[MEMBER SHARES]',
+    ...people.map((person) => `${sanitizeShareText(person.name)}: ${money.format(Number(person.share))}`),
     '',
-    `↔ ${t('Who pays whom')}:`,
+    `[SETTLEMENT] ${t('Who pays whom')}:`,
     ...(settlements.length
-      ? settlements.map((transfer) => `${transfer.from} -> ${transfer.to}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
+      ? settlements.map((transfer) => `${sanitizeShareText(transfer.from)} -> ${sanitizeShareText(transfer.to)}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
       : [t('Everyone is settled. No payment is due.')]),
     '',
     'Shared via MoneyMind.',
   ].join('\n');
   const settlementMessage = [
-    '↔ MoneyMind Settlement',
+    '[SETTLEMENT] MoneyMind',
     '',
-    `📌 Expense: ${expense.title}`,
-    `💵 Total: ${money.format(Number(expense.amount))}`,
+    `[EXPENSE] ${sanitizeShareText(expense.title)}`,
+    `[TOTAL] ${money.format(Number(expense.amount))}`,
     '',
     settlements.length
-      ? settlements.map((transfer) => `${transfer.from} -> ${transfer.to}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
+      ? settlements.map((transfer) => `${sanitizeShareText(transfer.from)} -> ${sanitizeShareText(transfer.to)}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
       : [t('Everyone is settled. No payment is due.')],
     '',
     'Shared via MoneyMind.',
   ].join('\n');
-  const messageTemplate = `${messageType === 'expense' ? expenseMessage : settlementMessage}${note.trim() ? `\n\n◆ ${t('Note')}: ${note.trim()}` : ''}`;
-  const selectedMessage = editedMessage ?? messageTemplate;
+  const messageTemplate = `${messageType === 'expense' ? expenseMessage : settlementMessage}${note.trim() ? `\n\n[NOTE] ${sanitizeShareText(note)}` : ''}`;
+  const selectedMessage = sanitizeShareText(editedMessage ?? messageTemplate);
 
   const copyMessage = async () => {
     if (!confirmed) return;
     try {
-      await navigator.clipboard.writeText(selectedMessage);
+      await navigator.clipboard.writeText(sanitizeShareText(selectedMessage));
       setError('');
       setStatus(t('Message copied.'));
     } catch {
@@ -182,7 +183,7 @@ export default function GroupExpenseShareDialog({ expense, money }) {
       const receipt = await createReceiptImage(expense, people, money, date, paidBy);
       const file = new File([receipt], receiptName, { type: 'image/png' });
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ title: `${expense.title} receipt`, files: [file] });
+        await navigator.share({ title: `${sanitizeShareText(expense.title)} receipt`, files: [file] });
         setError('');
         setStatus(t('Receipt shared.'));
         return;
@@ -207,12 +208,12 @@ export default function GroupExpenseShareDialog({ expense, money }) {
     if (!confirmed) return;
     try {
       if (navigator.share) {
-        await navigator.share({ title: expense.title, text: selectedMessage });
+        await navigator.share({ title: sanitizeShareText(expense.title), text: sanitizeShareText(selectedMessage) });
         setError('');
         setStatus(t('Choose a group to share this expense.'));
         return;
       }
-      window.open(`https://wa.me/?text=${encodeURIComponent(selectedMessage)}`, '_blank', 'noopener,noreferrer');
+      window.open(`https://wa.me/?text=${encodeURIComponent(sanitizeShareText(selectedMessage))}`, '_blank', 'noopener,noreferrer');
     } catch (shareError) {
       if (shareError.name === 'AbortError') return;
       setStatus('');
@@ -360,7 +361,7 @@ export default function GroupExpenseShareDialog({ expense, money }) {
             <footer className="border-t border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-[#171c25]">
               <p className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold"><MessageCircle className="h-4 w-4 text-emerald-600" />{t('Share Via WhatsApp')}</p>
               <div className="grid grid-cols-2 gap-2">
-                <a href={confirmed ? `https://wa.me/?text=${encodeURIComponent(selectedMessage)}` : undefined} target="_blank" rel="noreferrer" aria-disabled={!confirmed} tabIndex={confirmed ? 0 : -1} className={`col-span-2 inline-flex min-h-14 items-center justify-center gap-2 rounded-full border border-emerald-950 bg-[#19d66b] px-3 text-center text-base font-bold text-slate-950 hover:bg-[#12c45e] ${confirmed ? '' : 'cursor-not-allowed opacity-50'}`}>
+                <a href={confirmed ? `https://wa.me/?text=${encodeURIComponent(sanitizeShareText(selectedMessage))}` : undefined} target="_blank" rel="noreferrer" aria-disabled={!confirmed} tabIndex={confirmed ? 0 : -1} className={`col-span-2 inline-flex min-h-14 items-center justify-center gap-2 rounded-full border border-emerald-950 bg-[#19d66b] px-3 text-center text-base font-bold text-slate-950 hover:bg-[#12c45e] ${confirmed ? '' : 'cursor-not-allowed opacity-50'}`}>
                   <MessageCircle className="h-4 w-4" />{t('Open WhatsApp')}
                 </a>
                 <button type="button" disabled={!confirmed} onClick={shareToGroup} className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-600 px-3 text-center text-xs font-bold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-400 dark:hover:bg-emerald-950 sm:text-sm">

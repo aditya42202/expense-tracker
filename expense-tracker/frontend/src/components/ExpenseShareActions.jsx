@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Copy, ExternalLink, MessageCircle, Share2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
+import { sanitizeShareText } from '../services/shareText';
 
 export default function ExpenseShareActions({ expense, compact = false, messageOverride, buttonLabel }) {
   const { t } = useLanguage();
@@ -15,15 +16,15 @@ export default function ExpenseShareActions({ expense, compact = false, messageO
     ? new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(`${expense.date}T00:00:00`))
     : '-';
   const defaultMessage = messageOverride || [
-    '◆ MoneyMind Expense Alert',
+    '[EXPENSE] MoneyMind',
     '',
-    `◆ Expense: ${expense.description || expense.category_name || t('Expense')}`,
-    `₹ Amount: ${amount}`,
-    `◆ Date: ${date}`,
-    `● Category: ${expense.category_name || '-'}`,
-    expense.merchant_name ? `● Merchant: ${expense.merchant_name}` : null,
-    `● Payment Method: ${expense.payment_method || '-'}`,
-    expense.notes ? `◆ Note: ${expense.notes}` : null,
+    `[EXPENSE] ${sanitizeShareText(expense.description || expense.category_name || t('Expense'))}`,
+    `[AMOUNT] ${amount}`,
+    `[DATE] ${date}`,
+    `[CATEGORY] ${sanitizeShareText(expense.category_name || '-')}`,
+    expense.merchant_name ? `[MERCHANT] ${sanitizeShareText(expense.merchant_name)}` : null,
+    `[PAYMENT METHOD] ${sanitizeShareText(expense.payment_method || '-')}`,
+    expense.notes ? `[NOTE] ${sanitizeShareText(expense.notes)}` : null,
     '',
     'Manage Money. Master Your Future.',
     'Shared via MoneyMind.',
@@ -43,17 +44,18 @@ export default function ExpenseShareActions({ expense, compact = false, messageO
 
   const shareExpense = async () => {
     setShareStatus('');
+    const shareMessage = sanitizeShareText(message);
     try {
       if (navigator.share) {
-        await navigator.share({ title: t('MoneyMind Expense'), text: message, url: entryUrl });
+        await navigator.share({ title: t('MoneyMind Expense'), text: shareMessage, url: entryUrl });
         return;
       }
-      await navigator.clipboard.writeText(`${message}\n\n${entryUrl}`);
+      await navigator.clipboard.writeText(`${shareMessage}\n\n${entryUrl}`);
       setShareStatus(t('Expense details copied. Paste them into the app you want to share with.'));
     } catch (shareError) {
       if (shareError.name === 'AbortError') return;
       try {
-        await navigator.clipboard.writeText(`${message}\n\n${entryUrl}`);
+        await navigator.clipboard.writeText(`${shareMessage}\n\n${entryUrl}`);
         setShareStatus(t('Expense details copied. Paste them into the app you want to share with.'));
       } catch {
         setShareStatus(t('Unable to share or copy the expense. Check browser permissions and try again.'));
@@ -98,7 +100,7 @@ export default function ExpenseShareActions({ expense, compact = false, messageO
               <button type="button" onClick={shareExpense} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-emerald-300 px-4 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-50">
                 <Share2 className="h-4 w-4" />{t('Share with apps')}
               </button>
-              <a href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer" onClick={() => { setWhatsappOpened(true); setPreviewOpen(false); }}
+              <a href={`https://wa.me/?text=${encodeURIComponent(sanitizeShareText(message))}`} target="_blank" rel="noreferrer" onClick={() => { setWhatsappOpened(true); setPreviewOpen(false); }}
                 className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#168653] px-4 py-2 text-sm font-semibold text-white hover:bg-[#116d43]">
                 <MessageCircle className="h-4 w-4" />{t('Open WhatsApp')}
               </a>
