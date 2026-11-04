@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { PencilLine, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import createIdempotencyKey from '../../services/idempotency';
 import { useLanguage } from '../../context/LanguageContext';
 import ExpenseShareActions from '../../components/ExpenseShareActions';
 
@@ -20,8 +19,6 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const [newPersonName, setNewPersonName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [createdExpense, setCreatedExpense] = useState(null);
-  const [submissionKey, setSubmissionKey] = useState(createIdempotencyKey);
   const [saving, setSaving] = useState(false);
   const [suggestingCategory, setSuggestingCategory] = useState(false);
   const [aiConsent, setAiConsent] = useState(false);
@@ -135,7 +132,6 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
-    setCreatedExpense(null);
     try {
       const payload = {
         category: Number(form.category),
@@ -148,20 +144,13 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
         payment_method: form.payment_method,
       };
 
-      if (form.id) {
-        await api.put(`/expenses/${form.id}/`, payload);
-      } else {
-        const { data } = await api.post('/expenses/', payload, { headers: { 'Idempotency-Key': submissionKey } });
-        setCreatedExpense(data);
-        setSubmissionKey(createIdempotencyKey());
-      }
+      await api.put(`/expenses/${form.id}/`, payload);
 
       onExpenseChange();
       setForm({ id: null, category: '', person: '', amount: '', description: '', merchant_name: '', notes: '', date: new Date().toISOString().slice(0, 10), payment_method: 'UPI' });
       setAiConsent(false);
       loadData();
     } catch (err) {
-      if (err.response?.status === 409) setSubmissionKey(createIdempotencyKey());
       setError(err.response?.data?.detail || 'Unable to save expense.');
     } finally {
       setSaving(false);
@@ -244,7 +233,6 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   };
 
   const handleEdit = (item) => {
-    setCreatedExpense(null);
     setForm({
       id: item.id,
       category: item.category,
@@ -361,9 +349,13 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
         </section>
       )}
 
-      <div className="grid min-w-0 gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+      <div className="space-y-6">
+        {form.id && (
         <form onSubmit={handleSubmit} className="min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-900">{t(form.id ? 'Edit expense' : 'Create expense')}</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-xl font-semibold text-slate-900">{t('Edit expense')}</h2>
+            <button type="button" onClick={() => setForm((current) => ({ ...current, id: null }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">{t('Cancel')}</button>
+          </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">{t('Category')}</label>
             <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-900 focus:border-indigo-400" required>
@@ -424,10 +416,10 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
           </div>
 
           <button type="submit" disabled={saving} className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60">
-            {saving ? t('Saving...') : t(form.id ? 'Update expense' : 'Save expense')}
+            {saving ? t('Saving...') : t('Update expense')}
           </button>
-          {createdExpense && <ExpenseShareActions expense={createdExpense} />}
         </form>
+        )}
 
         <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           {linkedExpense && (
@@ -488,6 +480,8 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                     <th className="px-3 py-3">{t('Category')}</th>
                     <th className="px-3 py-3">{t('Paid by')}</th>
                     <th className="px-3 py-3">{t('Description')}</th>
+                    <th className="px-3 py-3">{t('Merchant')}</th>
+                    <th className="px-3 py-3">{t('Notes')}</th>
                     <th className="px-3 py-3">{t('Amount')}</th>
                     <th className="px-3 py-3">{t('Payment')}</th>
                     <th className="px-3 py-3 text-right">{t('Actions')}</th>
@@ -501,6 +495,8 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                       <td className="px-3 py-3">{item.category_name}</td>
                       <td className="px-3 py-3">{item.person_name || '-'}</td>
                       <td className="px-3 py-3">{item.description || '-'}</td>
+                      <td className="px-3 py-3">{item.merchant_name || '-'}</td>
+                      <td className="px-3 py-3 whitespace-pre-wrap">{item.notes || '-'}</td>
                       <td className="px-3 py-3 font-semibold text-slate-900">{localizedMoney.format(Number(item.amount))}</td>
                       <td className="px-3 py-3">{item.payment_method}</td>
                       <td className="px-3 py-3">
