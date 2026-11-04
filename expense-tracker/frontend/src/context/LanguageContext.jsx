@@ -53,6 +53,7 @@ const hindi = {
   Payment: 'भुगतान',
   'Expense tracking': 'खर्च का हिसाब', 'Personal expenses ke saath group expenses bhi manage karein.': 'व्यक्तिगत और समूह के खर्च यहाँ संभालें।',
   'Add expense': 'खर्च जोड़ें', 'Create expense': 'खर्च दर्ज करें', 'Edit expense': 'खर्च संपादित करें',
+  Show: 'दिखाएँ', Hide: 'छिपाएँ', Merchant: 'दुकान', Notes: 'नोट्स',
   'Equal split settlement': 'बराबर हिस्से का हिसाब',
   'Payer-assigned expenses are split across all ': 'दर्ज किए गए खर्च सभी ',
   ' listed people, including anyone who paid nothing.': ' लोगों में बराबर बाँटे जाते हैं, जिन्होंने भुगतान नहीं किया वे भी शामिल हैं।',

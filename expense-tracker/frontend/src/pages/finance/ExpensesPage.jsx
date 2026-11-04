@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { PencilLine, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Eye, EyeOff, PencilLine, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useLanguage } from '../../context/LanguageContext';
@@ -23,6 +23,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const [suggestingCategory, setSuggestingCategory] = useState(false);
   const [aiConsent, setAiConsent] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [expandedExpenseId, setExpandedExpenseId] = useState(null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
   const [dateFrom, setDateFrom] = useState('');
@@ -480,6 +481,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                     <th className="px-3 py-3">{t('Category')}</th>
                     <th className="px-3 py-3">{t('Paid by')}</th>
                     <th className="px-3 py-3">{t('Description')}</th>
+                    <th className="px-3 py-3">{t('Show')}</th>
                     <th className="px-3 py-3">{t('Merchant')}</th>
                     <th className="px-3 py-3">{t('Notes')}</th>
                     <th className="px-3 py-3">{t('Amount')}</th>
@@ -488,30 +490,63 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredExpenses.map((item) => (
-                    <tr key={item.id} className="border-t border-slate-200">
-                      <td className="px-3 py-3"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleSelected(item.id)} aria-label={`${t('Select expense')} ${item.description || item.category_name}`} /></td>
-                      <td className="px-3 py-3">{item.date}</td>
-                      <td className="px-3 py-3">{item.category_name}</td>
-                      <td className="px-3 py-3">{item.person_name || '-'}</td>
-                      <td className="px-3 py-3">{item.description || '-'}</td>
-                      <td className="px-3 py-3">{item.merchant_name || '-'}</td>
-                      <td className="px-3 py-3 whitespace-pre-wrap">{item.notes || '-'}</td>
-                      <td className="px-3 py-3 font-semibold text-slate-900">{localizedMoney.format(Number(item.amount))}</td>
-                      <td className="px-3 py-3">{item.payment_method}</td>
-                      <td className="px-3 py-3">
-                        <div className="flex justify-end gap-2">
-                          <ExpenseShareActions expense={item} compact />
-                          <button type="button" onClick={() => handleEdit(item)} className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50" aria-label={t('Edit expense')}>
-                            <PencilLine className="h-4 w-4" />
-                          </button>
-                          <button type="button" onClick={() => handleDelete(item.id)} className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100" aria-label={t('Delete expense')}>
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredExpenses.map((item) => {
+                    const isExpanded = expandedExpenseId === item.id;
+                    const detailId = `expense-details-${item.id}`;
+                    return (
+                      <Fragment key={item.id}>
+                        <tr className="border-t border-slate-200">
+                          <td className="px-3 py-3"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleSelected(item.id)} aria-label={`${t('Select expense')} ${item.description || item.category_name}`} /></td>
+                          <td className="px-3 py-3">{item.date}</td>
+                          <td className="px-3 py-3">{item.category_name}</td>
+                          <td className="px-3 py-3">{item.person_name || '-'}</td>
+                          <td className="px-3 py-3">{item.description || '-'}</td>
+                          <td className="px-3 py-3">
+                            <button type="button" onClick={() => setExpandedExpenseId(isExpanded ? null : item.id)}
+                              aria-expanded={isExpanded} aria-controls={detailId}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                              {isExpanded ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              {t(isExpanded ? 'Hide' : 'Show')}
+                            </button>
+                          </td>
+                          <td className="px-3 py-3">{item.merchant_name || '-'}</td>
+                          <td className="px-3 py-3 whitespace-pre-wrap">{item.notes || '-'}</td>
+                          <td className="px-3 py-3 font-semibold text-slate-900">{localizedMoney.format(Number(item.amount))}</td>
+                          <td className="px-3 py-3">{item.payment_method}</td>
+                          <td className="px-3 py-3">
+                            <div className="flex justify-end gap-2">
+                              <ExpenseShareActions expense={item} compact />
+                              <button type="button" onClick={() => handleEdit(item)} className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50" aria-label={t('Edit expense')}>
+                                <PencilLine className="h-4 w-4" />
+                              </button>
+                              <button type="button" onClick={() => handleDelete(item.id)} className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100" aria-label={t('Delete expense')}>
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="border-t border-slate-100 bg-slate-50">
+                            <td id={detailId} colSpan={11} className="px-5 py-4">
+                              <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Date')}</dt><dd className="mt-1 text-slate-900">{item.date || '-'}</dd></div>
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Category')}</dt><dd className="mt-1 text-slate-900">{item.category_name || '-'}</dd></div>
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Paid by')}</dt><dd className="mt-1 text-slate-900">{item.person_name || '-'}</dd></div>
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Description')}</dt><dd className="mt-1 whitespace-pre-wrap text-slate-900">{item.description || '-'}</dd></div>
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Merchant')}</dt><dd className="mt-1 text-slate-900">{item.merchant_name || '-'}</dd></div>
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Amount')}</dt><dd className="mt-1 text-slate-900">{localizedPreciseMoney.format(Number(item.amount))}</dd></div>
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Payment method')}</dt><dd className="mt-1 text-slate-900">{t(item.payment_method || '-')}</dd></div>
+                                <div className="sm:col-span-2 lg:col-span-3"><dt className="text-xs font-medium text-slate-500">{t('Notes')}</dt><dd className="mt-1 whitespace-pre-wrap text-slate-900">{item.notes || '-'}</dd></div>
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Recorded by')}</dt><dd className="mt-1 text-slate-900">{item.user_name || '-'}</dd></div>
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Created')}</dt><dd className="mt-1 text-slate-900">{item.created_at ? new Date(item.created_at).toLocaleString(language === 'hi' ? 'hi-IN' : 'en-IN') : '-'}</dd></div>
+                                <div><dt className="text-xs font-medium text-slate-500">{t('Last updated')}</dt><dd className="mt-1 text-slate-900">{item.updated_at ? new Date(item.updated_at).toLocaleString(language === 'hi' ? 'hi-IN' : 'en-IN') : '-'}</dd></div>
+                              </dl>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
