@@ -130,37 +130,37 @@ export default function GroupExpenseShareDialog({ expense, money }) {
     ? new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(`${expense.date}T00:00:00`))
     : '-';
   const expenseMessage = [
-    '💰 MoneyMind Group Expense',
+    '◆ MoneyMind Group Expense',
     '',
-    `👥 Group: ${t('Shared expenses')}`,
-    `📌 Expense: ${expense.title}`,
-    `💵 Total: ${money.format(Number(expense.amount))}`,
-    `📅 Date: ${date}`,
-    `👤 Paid By: ${paidBy}`,
+    `● Group: ${t('Shared expenses')}`,
+    `◆ Expense: ${expense.title}`,
+    `₹ Total: ${money.format(Number(expense.amount))}`,
+    `◆ Date: ${date}`,
+    `● Paid By: ${paidBy}`,
     '',
-    'Member-wise Breakdown:',
+    '◆ Member-wise Breakdown:',
     ...people.map((person) => `${person.name}: ${money.format(Number(person.share))}`),
     '',
-    `${t('Who pays whom')}:`,
+    `↔ ${t('Who pays whom')}:`,
     ...(settlements.length
-      ? settlements.map((transfer) => `${transfer.from} → ${transfer.to}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
+      ? settlements.map((transfer) => `${transfer.from} -> ${transfer.to}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
       : [t('Everyone is settled. No payment is due.')]),
     '',
     'Shared via MoneyMind.',
   ].join('\n');
   const settlementMessage = [
-    '↔️ MoneyMind Settlement',
+    '↔ MoneyMind Settlement',
     '',
     `📌 Expense: ${expense.title}`,
     `💵 Total: ${money.format(Number(expense.amount))}`,
     '',
     settlements.length
-      ? settlements.map((transfer) => `${transfer.from} → ${transfer.to}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
+      ? settlements.map((transfer) => `${transfer.from} -> ${transfer.to}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
       : [t('Everyone is settled. No payment is due.')],
     '',
     'Shared via MoneyMind.',
   ].join('\n');
-  const messageTemplate = `${messageType === 'expense' ? expenseMessage : settlementMessage}${note.trim() ? `\n\n📝 ${t('Note')}: ${note.trim()}` : ''}`;
+  const messageTemplate = `${messageType === 'expense' ? expenseMessage : settlementMessage}${note.trim() ? `\n\n◆ ${t('Note')}: ${note.trim()}` : ''}`;
   const selectedMessage = editedMessage ?? messageTemplate;
 
   const copyMessage = async () => {

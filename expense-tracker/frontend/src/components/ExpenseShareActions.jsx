@@ -15,15 +15,15 @@ export default function ExpenseShareActions({ expense, compact = false, messageO
     ? new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(`${expense.date}T00:00:00`))
     : '-';
   const defaultMessage = messageOverride || [
-    '💰 MoneyMind Expense Alert',
+    '◆ MoneyMind Expense Alert',
     '',
-    `📌 Expense: ${expense.description || expense.category_name || t('Expense')}`,
-    `💵 Amount: ${amount}`,
-    `📅 Date: ${date}`,
-    `🏷️ Category: ${expense.category_name || '-'}`,
-    expense.merchant_name ? `🏪 Merchant: ${expense.merchant_name}` : null,
-    `💳 Payment Method: ${expense.payment_method || '-'}`,
-    expense.notes ? `📝 Note: ${expense.notes}` : null,
+    `◆ Expense: ${expense.description || expense.category_name || t('Expense')}`,
+    `₹ Amount: ${amount}`,
+    `◆ Date: ${date}`,
+    `● Category: ${expense.category_name || '-'}`,
+    expense.merchant_name ? `● Merchant: ${expense.merchant_name}` : null,
+    `● Payment Method: ${expense.payment_method || '-'}`,
+    expense.notes ? `◆ Note: ${expense.notes}` : null,
     '',
     'Manage Money. Master Your Future.',
     'Shared via MoneyMind.',
