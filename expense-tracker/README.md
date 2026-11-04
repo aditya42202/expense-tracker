@@ -47,6 +47,15 @@ The development default is `backend/db.sqlite3`. `DATABASE_URL=sqlite:///db.sqli
 
 Production requires a provider-issued PostgreSQL connection URL in `DATABASE_URL`; Django rejects a missing or SQLite production URL rather than silently storing data on an ephemeral filesystem. Do not put credentials in source control or frontend variables. Run migrations during deployment. Existing SQLite data is not automatically copied to PostgreSQL; use a planned export/import when promoting real data.
 
+## Backend tests
+
+Run backend tests with the isolated SQLite test settings so the test runner never creates or deletes a test database on the configured PostgreSQL server:
+
+```powershell
+cd backend
+python manage.py test --settings=config.test_settings
+```
+
 ## API
 
 All private endpoints require `Authorization: Bearer <access-token>`. Sign-in requires a valid password followed by a six-digit code sent to the account email; the API issues access/refresh JWTs only after code verification. Login codes expire in 10 minutes, allow five attempts, and can be resent after the cooldown. JWT access tokens expire after one day and refresh tokens after seven days. The API scopes personal records to the authenticated account.
