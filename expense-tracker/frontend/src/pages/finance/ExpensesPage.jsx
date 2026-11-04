@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PencilLine, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import createIdempotencyKey from '../../services/idempotency';
 import { useLanguage } from '../../context/LanguageContext';
@@ -278,7 +278,6 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
             <h1 className="text-3xl font-bold text-slate-900">{t('Expenses')}</h1>
             <p className="mt-2 text-sm text-slate-500">{t('Personal expenses ke saath group expenses bhi manage karein.')}</p>
           </div>
-          <div className="flex flex-wrap gap-2"><Link to="/group-expenses" className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#287253] bg-[#e8f3ee] px-4 py-2.5 text-sm font-semibold text-[#287253] hover:bg-[#d8eee3]">{t('Add group expense')}</Link><Link to="/daily-expenses" className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"><Plus className="h-4 w-4" /> {t('Add expense')}</Link></div>
         </div>
       </div>
 
