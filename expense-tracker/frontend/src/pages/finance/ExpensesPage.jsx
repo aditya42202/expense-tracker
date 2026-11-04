@@ -82,7 +82,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
       const matchesCategory = !categoryFilter || (
         item.historyType === 'Personal'
           ? String(item.category) === categoryFilter
-          : item.category_name === selectedCategory?.name
+          : item.category_name.trim().toLocaleLowerCase() === selectedCategory?.name.trim().toLocaleLowerCase()
       );
       return matchesQuery && matchesDate && matchesCategory;
     });
@@ -496,9 +496,14 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
             <label className="text-xs font-medium text-slate-600">{t('From')}<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900" /></label>
             <label className="text-xs font-medium text-slate-600">{t('To')}<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900" /></label>
             <label className="text-xs font-medium text-slate-600">{t('Category')}<select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900"><option value="">{t('All categories')}</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-            <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); setCategoryFilter(''); setQuery(''); }} className="self-end min-h-11 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('Clear filters')}</button>
+            <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); setCategoryFilter(''); setQuery(''); setSort('newest'); }} className="self-end min-h-11 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('Clear filters')}</button>
           </div>
 
+          {!loading && !error && (
+            <p className="mb-3 text-xs text-slate-500" aria-live="polite">
+              {t('Showing ')}{filteredExpenses.length}{t(' of ')}{historyExpenses.length}{t(' expenses')}
+            </p>
+          )}
           {loading ? (
             <div className="py-10 text-center text-slate-500">{t('Loading expenses...')}</div>
           ) : error ? (

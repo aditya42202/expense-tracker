@@ -56,6 +56,7 @@ const hindi = {
   Show: 'दिखाएँ', Hide: 'छिपाएँ', 'Show history': 'इतिहास दिखाएँ', 'Hide history': 'इतिहास छिपाएँ',
   'View your personal and group expense history.': 'अपने व्यक्तिगत और समूह के खर्चों का इतिहास देखें।',
   'No personal or group expenses match your search and filters.': 'आपकी खोज और फ़िल्टर से मेल खाते कोई व्यक्तिगत या समूह खर्च नहीं हैं।',
+  'Showing ': 'दिखा रहे हैं ', ' of ': ' में से ', ' expenses': ' खर्च',
   Merchant: 'दुकान', Notes: 'नोट्स',
   'Equal split settlement': 'बराबर हिस्से का हिसाब',
   'Payer-assigned expenses are split across all ': 'दर्ज किए गए खर्च सभी ',
