@@ -52,7 +52,8 @@ class ChatMessageSerializer(serializers.ModelSerializer):
         if reactions is None:
             reactions = obj.reactions.select_related("user").all()
         counts = {}
-        current_user_id = self.context.get("request").user.pk if self.context.get("request") else None
+        request = self.context.get("request")
+        current_user_id = request.user.pk if request is not None else None
         for reaction in reactions:
             counts.setdefault(reaction.emoji, {"emoji": reaction.emoji, "count": 0, "reacted_by_me": False})
             counts[reaction.emoji]["count"] += 1

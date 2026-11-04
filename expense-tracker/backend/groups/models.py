@@ -108,6 +108,7 @@ class Settlement(models.Model):
 
 class ChatMessage(models.Model):
     id: int
+    sender_id: int
 
     MESSAGE_TYPE_CHOICES = [
         ("TEXT", "Text"),
