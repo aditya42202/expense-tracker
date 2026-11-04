@@ -11,9 +11,10 @@ const avatarColors = [
 ];
 
 function createReceiptImage(expense, people, money, date, paidBy) {
+  const settlements = expense.settlements || [];
   const canvas = document.createElement('canvas');
   canvas.width = 720;
-  canvas.height = 480 + people.length * 52;
+  canvas.height = 560 + people.length * 52 + settlements.length * 42;
   const context = canvas.getContext('2d');
 
   if (!context) throw new Error('Unable to create the receipt image.');
@@ -82,6 +83,26 @@ function createReceiptImage(expense, people, money, date, paidBy) {
   context.fillText('Total amount', 64, totalY);
   context.textAlign = 'right';
   context.fillText(money.format(Number(expense.amount)), canvas.width - 64, totalY);
+  context.textAlign = 'left';
+
+  const settlementTop = totalY + 48;
+  context.fillStyle = '#0f172a';
+  context.font = 'bold 19px Arial';
+  context.fillText('Who pays whom', 64, settlementTop);
+  context.font = '16px Arial';
+  if (settlements.length) {
+    settlements.forEach((transfer, index) => {
+      const y = settlementTop + 32 + index * 36;
+      context.fillStyle = '#334155';
+      context.fillText(`${transfer.from} → ${transfer.to}`, 64, y);
+      context.textAlign = 'right';
+      context.fillText(money.format(Number(transfer.amount)), canvas.width - 64, y);
+      context.textAlign = 'left';
+    });
+  } else {
+    context.fillStyle = '#166534';
+    context.fillText('Everyone is settled. No payment is due.', 64, settlementTop + 32);
+  }
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -103,6 +124,7 @@ export default function GroupExpenseShareDialog({ expense, money }) {
   const [confirmed, setConfirmed] = useState(false);
 
   const people = expense.participant_details || [];
+  const settlements = expense.settlements || [];
   const paidBy = people.filter((person) => Number(person.paid) > 0).map((person) => person.name).join(', ') || t('Not specified');
   const date = expense.date
     ? new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(`${expense.date}T00:00:00`))
@@ -119,6 +141,11 @@ export default function GroupExpenseShareDialog({ expense, money }) {
     'Member-wise Breakdown:',
     ...people.map((person) => `${person.name}: ${money.format(Number(person.share))}`),
     '',
+    `${t('Who pays whom')}:`,
+    ...(settlements.length
+      ? settlements.map((transfer) => `${transfer.from} → ${transfer.to}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
+      : [t('Everyone is settled. No payment is due.')]),
+    '',
     'Shared via MoneyMind.',
   ].join('\n');
   const settlementMessage = [
@@ -127,8 +154,8 @@ export default function GroupExpenseShareDialog({ expense, money }) {
     `📌 Expense: ${expense.title}`,
     `💵 Total: ${money.format(Number(expense.amount))}`,
     '',
-    ...(expense.settlements || []).length
-      ? expense.settlements.map((transfer) => `${transfer.from} → ${transfer.to}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
+    settlements.length
+      ? settlements.map((transfer) => `${transfer.from} → ${transfer.to}: ${money.format(Number(transfer.amount))} (${transfer.status === 'SETTLED' ? t('Settled') : t('Pending')})`)
       : [t('Everyone is settled. No payment is due.')],
     '',
     'Shared via MoneyMind.',
@@ -292,6 +319,15 @@ export default function GroupExpenseShareDialog({ expense, money }) {
                     <Check className="h-4 w-4 text-emerald-700 dark:text-emerald-300" />
                   </div>
                 </div>
+                <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+                  <h4 className="mb-2 text-sm font-bold">{t('Who pays whom')}</h4>
+                  {settlements.length ? <div className="space-y-2">
+                    {settlements.map((transfer) => <div key={transfer.id} className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-xs dark:bg-[#1b2029]">
+                      <span className="min-w-0 truncate font-semibold">{transfer.from} <span className="text-slate-400">→</span> {transfer.to}</span>
+                      <span className="shrink-0 font-bold text-emerald-700 dark:text-emerald-300">{money.format(Number(transfer.amount))}</span>
+                    </div>)}
+                  </div> : <p className="text-xs text-emerald-800 dark:text-emerald-200">{t('Everyone is settled. No payment is due.')}</p>}
+                </div>
               </section>
 
               <div className="grid grid-cols-3 gap-2">
@@ -324,10 +360,10 @@ export default function GroupExpenseShareDialog({ expense, money }) {
             <footer className="border-t border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-[#171c25]">
               <p className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold"><MessageCircle className="h-4 w-4 text-emerald-600" />{t('Share Via WhatsApp')}</p>
               <div className="grid grid-cols-2 gap-2">
-                <a href={confirmed ? `https://wa.me/?text=${encodeURIComponent(selectedMessage)}` : undefined} target="_blank" rel="noreferrer" aria-disabled={!confirmed} tabIndex={confirmed ? 0 : -1} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#0b9a43] px-3 text-center text-xs font-bold text-white hover:bg-[#087c36] sm:text-sm ${confirmed ? '' : 'cursor-not-allowed opacity-50'}`}>
-                  <MessageCircle className="h-4 w-4" />{t('Share on WhatsApp')}
+                <a href={confirmed ? `https://wa.me/?text=${encodeURIComponent(selectedMessage)}` : undefined} target="_blank" rel="noreferrer" aria-disabled={!confirmed} tabIndex={confirmed ? 0 : -1} className={`col-span-2 inline-flex min-h-14 items-center justify-center gap-2 rounded-full border border-emerald-950 bg-[#19d66b] px-3 text-center text-base font-bold text-slate-950 hover:bg-[#12c45e] ${confirmed ? '' : 'cursor-not-allowed opacity-50'}`}>
+                  <MessageCircle className="h-4 w-4" />{t('Open WhatsApp')}
                 </a>
-                <button type="button" disabled={!confirmed} onClick={shareToGroup} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-600 px-3 text-center text-xs font-bold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-400 dark:hover:bg-emerald-950 sm:text-sm">
+                <button type="button" disabled={!confirmed} onClick={shareToGroup} className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-600 px-3 text-center text-xs font-bold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-400 dark:hover:bg-emerald-950 sm:text-sm">
                   <Users className="h-4 w-4" />{t('Share to Group')}
                 </button>
               </div>
