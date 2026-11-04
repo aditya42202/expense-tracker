@@ -11,9 +11,10 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const { language, t } = useLanguage();
   const [searchParams] = useSearchParams();
   const entryId = searchParams.get('entry');
-  const localizedMoney = new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
-  const localizedPreciseMoney = new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const localizedMoney = useMemo(() => new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }), [language]);
+  const localizedPreciseMoney = useMemo(() => new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }), [language]);
   const [expenses, setExpenses] = useState([]);
+  const [groupExpenses, setGroupExpenses] = useState([]);
   const [categories, setCategories] = useState([]);
   const [people, setPeople] = useState([]);
   const [newPersonName, setNewPersonName] = useState('');
@@ -24,6 +25,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const [aiConsent, setAiConsent] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [expandedExpenseId, setExpandedExpenseId] = useState(null);
+  const [historyVisible, setHistoryVisible] = useState(false);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
   const [dateFrom, setDateFrom] = useState('');
@@ -33,12 +35,14 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
 
   const loadData = async () => {
     try {
-      const [expenseRes, categoryRes, peopleRes] = await Promise.all([
+      const [expenseRes, groupExpenseRes, categoryRes, peopleRes] = await Promise.all([
         api.get('/expenses/'),
+        api.get('/group-expenses/'),
         api.get('/categories/'),
         api.get('/people/'),
       ]);
       setExpenses(expenseRes.data);
+      setGroupExpenses(groupExpenseRes.data);
       setCategories(categoryRes.data.filter((item) => item.type === 'EXPENSE'));
       setPeople(peopleRes.data);
       setError('');
@@ -53,11 +57,33 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
     loadData();
   }, []);
 
+  const historyExpenses = useMemo(() => [
+    ...expenses.map((item) => ({ ...item, historyType: 'Personal', historyKey: `personal-${item.id}` })),
+    ...groupExpenses.map((item) => ({
+      ...item,
+      historyType: 'Group',
+      historyKey: `group-${item.id}`,
+      description: item.title,
+      category_name: item.category || '',
+      person_name: (item.participant_details || [])
+        .filter((participant) => Number(participant.paid) > 0)
+        .map((participant) => `${participant.name} (${localizedMoney.format(Number(participant.paid))})`)
+        .join(', '),
+    })),
+  ], [expenses, groupExpenses, localizedMoney]);
+
   const filteredExpenses = useMemo(() => {
-    const list = [...expenses].filter((item) => {
-      const matchesQuery = !query || [item.description, item.merchant_name, item.notes, item.category_name, item.person_name, item.payment_method].join(' ').toLowerCase().includes(query.toLowerCase());
+    const list = [...historyExpenses].filter((item) => {
+      const matchesQuery = !query || [
+        item.description, item.merchant_name, item.notes, item.category_name, item.person_name, item.payment_method, item.historyType,
+      ].join(' ').toLowerCase().includes(query.toLowerCase());
       const matchesDate = (!dateFrom || item.date >= dateFrom) && (!dateTo || item.date <= dateTo);
-      const matchesCategory = !categoryFilter || String(item.category) === categoryFilter;
+      const selectedCategory = categories.find((category) => String(category.id) === categoryFilter);
+      const matchesCategory = !categoryFilter || (
+        item.historyType === 'Personal'
+          ? String(item.category) === categoryFilter
+          : item.category_name === selectedCategory?.name
+      );
       return matchesQuery && matchesDate && matchesCategory;
     });
 
@@ -71,7 +97,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
       default:
         return list.sort((a, b) => new Date(b.date) - new Date(a.date));
     }
-  }, [expenses, query, sort, dateFrom, dateTo, categoryFilter]);
+  }, [historyExpenses, query, sort, dateFrom, dateTo, categoryFilter, categories]);
   const linkedExpense = expenses.find((item) => String(item.id) === entryId);
   const selectedExpenses = expenses.filter((item) => selectedIds.includes(item.id));
   const bulkShareMessage = [
@@ -189,7 +215,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   ));
 
   const selectVisible = () => {
-    const visibleIds = filteredExpenses.map((item) => item.id);
+    const visibleIds = filteredExpenses.filter((item) => item.historyType === 'Personal').map((item) => item.id);
     setSelectedIds((current) => visibleIds.every((id) => current.includes(id))
       ? current.filter((id) => !visibleIds.includes(id))
       : [...new Set([...current, ...visibleIds])]);
@@ -437,6 +463,17 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
               </dl>
             </section>
           )}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-slate-600">{t('View your personal and group expense history.')}</p>
+            <button type="button" onClick={() => setHistoryVisible((visible) => !visible)}
+              aria-expanded={historyVisible}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#173d32] px-4 py-2 text-sm font-semibold text-white hover:bg-[#225543]">
+              {historyVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {t(historyVisible ? 'Hide history' : 'Show history')}
+              {!historyVisible && ` (${historyExpenses.length})`}
+            </button>
+          </div>
+          {historyVisible && <>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative w-full sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -469,7 +506,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
           ) : filteredExpenses.length === 0 ? (
             <div className="py-10 text-center">
               <p className="text-lg font-semibold text-slate-900">{t('No expenses found')}</p>
-              <p className="mt-1 text-sm text-slate-500">{t('Add your first expense to start tracking spending.')}</p>
+              <p className="mt-1 text-sm text-slate-500">{t('No personal or group expenses match your search and filters.')}</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -491,18 +528,23 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                 </thead>
                 <tbody>
                   {filteredExpenses.map((item) => {
-                    const isExpanded = expandedExpenseId === item.id;
-                    const detailId = `expense-details-${item.id}`;
+                    const isExpanded = expandedExpenseId === item.historyKey;
+                    const detailId = `expense-details-${item.historyKey}`;
                     return (
-                      <Fragment key={item.id}>
+                      <Fragment key={item.historyKey}>
                         <tr className="border-t border-slate-200">
-                          <td className="px-3 py-3"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleSelected(item.id)} aria-label={`${t('Select expense')} ${item.description || item.category_name}`} /></td>
+                          <td className="px-3 py-3">
+                            {item.historyType === 'Personal' && <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleSelected(item.id)} aria-label={`${t('Select expense')} ${item.description || item.category_name}`} />}
+                          </td>
                           <td className="px-3 py-3">{item.date}</td>
                           <td className="px-3 py-3">{item.category_name}</td>
                           <td className="px-3 py-3">{item.person_name || '-'}</td>
-                          <td className="px-3 py-3">{item.description || '-'}</td>
                           <td className="px-3 py-3">
-                            <button type="button" onClick={() => setExpandedExpenseId(isExpanded ? null : item.id)}
+                            {item.description || '-'}
+                            {item.historyType === 'Group' && <span className="ml-2 rounded bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">{t('Group')}</span>}
+                          </td>
+                          <td className="px-3 py-3">
+                            <button type="button" onClick={() => setExpandedExpenseId(isExpanded ? null : item.historyKey)}
                               aria-expanded={isExpanded} aria-controls={detailId}
                               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
                               {isExpanded ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -512,16 +554,18 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                           <td className="px-3 py-3">{item.merchant_name || '-'}</td>
                           <td className="px-3 py-3 whitespace-pre-wrap">{item.notes || '-'}</td>
                           <td className="px-3 py-3 font-semibold text-slate-900">{localizedMoney.format(Number(item.amount))}</td>
-                          <td className="px-3 py-3">{item.payment_method}</td>
+                          <td className="px-3 py-3">{item.payment_method || '-'}</td>
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
-                              <ExpenseShareActions expense={item} compact />
-                              <button type="button" onClick={() => handleEdit(item)} className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50" aria-label={t('Edit expense')}>
-                                <PencilLine className="h-4 w-4" />
-                              </button>
-                              <button type="button" onClick={() => handleDelete(item.id)} className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100" aria-label={t('Delete expense')}>
-                                <Trash2 className="h-4 w-4" />
-                              </button>
+                              {item.historyType === 'Personal' && <>
+                                <ExpenseShareActions expense={item} compact />
+                                <button type="button" onClick={() => handleEdit(item)} className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50" aria-label={t('Edit expense')}>
+                                  <PencilLine className="h-4 w-4" />
+                                </button>
+                                <button type="button" onClick={() => handleDelete(item.id)} className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100" aria-label={t('Delete expense')}>
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </>}
                             </div>
                           </td>
                         </tr>
@@ -535,9 +579,36 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                                 <div><dt className="text-xs font-medium text-slate-500">{t('Description')}</dt><dd className="mt-1 whitespace-pre-wrap text-slate-900">{item.description || '-'}</dd></div>
                                 <div><dt className="text-xs font-medium text-slate-500">{t('Merchant')}</dt><dd className="mt-1 text-slate-900">{item.merchant_name || '-'}</dd></div>
                                 <div><dt className="text-xs font-medium text-slate-500">{t('Amount')}</dt><dd className="mt-1 text-slate-900">{localizedPreciseMoney.format(Number(item.amount))}</dd></div>
-                                <div><dt className="text-xs font-medium text-slate-500">{t('Payment method')}</dt><dd className="mt-1 text-slate-900">{t(item.payment_method || '-')}</dd></div>
-                                <div className="sm:col-span-2 lg:col-span-3"><dt className="text-xs font-medium text-slate-500">{t('Notes')}</dt><dd className="mt-1 whitespace-pre-wrap text-slate-900">{item.notes || '-'}</dd></div>
-                                <div><dt className="text-xs font-medium text-slate-500">{t('Recorded by')}</dt><dd className="mt-1 text-slate-900">{item.user_name || '-'}</dd></div>
+                                {item.historyType === 'Personal' ? <>
+                                  <div><dt className="text-xs font-medium text-slate-500">{t('Payment method')}</dt><dd className="mt-1 text-slate-900">{t(item.payment_method || '-')}</dd></div>
+                                  <div className="sm:col-span-2 lg:col-span-3"><dt className="text-xs font-medium text-slate-500">{t('Notes')}</dt><dd className="mt-1 whitespace-pre-wrap text-slate-900">{item.notes || '-'}</dd></div>
+                                  <div><dt className="text-xs font-medium text-slate-500">{t('Recorded by')}</dt><dd className="mt-1 text-slate-900">{item.user_name || '-'}</dd></div>
+                                </> : <>
+                                  <div className="sm:col-span-2 lg:col-span-3">
+                                    <dt className="text-xs font-medium text-slate-500">{t('Participants and shares')}</dt>
+                                    <dd className="mt-1">
+                                      {(item.participant_details || []).length ? (
+                                        <ul className="space-y-1 text-slate-900">
+                                          {item.participant_details.map((participant) => (
+                                            <li key={participant.id}>{participant.name}: {t('paid')} {localizedPreciseMoney.format(Number(participant.paid))}, {t('share')} {localizedPreciseMoney.format(Number(participant.share))}, {t(participant.status)}</li>
+                                          ))}
+                                        </ul>
+                                      ) : '-'}
+                                    </dd>
+                                  </div>
+                                  <div className="sm:col-span-2 lg:col-span-3">
+                                    <dt className="text-xs font-medium text-slate-500">{t('Settlement records')}</dt>
+                                    <dd className="mt-1">
+                                      {(item.settlements || []).length ? (
+                                        <ul className="space-y-1 text-slate-900">
+                                          {item.settlements.map((settlement) => (
+                                            <li key={settlement.id}>{settlement.from}{t(' pays ')}{settlement.to} {localizedPreciseMoney.format(Number(settlement.amount))} · {t(settlement.status)}</li>
+                                          ))}
+                                        </ul>
+                                      ) : t('No settlement required.')}
+                                    </dd>
+                                  </div>
+                                </>}
                                 <div><dt className="text-xs font-medium text-slate-500">{t('Created')}</dt><dd className="mt-1 text-slate-900">{item.created_at ? new Date(item.created_at).toLocaleString(language === 'hi' ? 'hi-IN' : 'en-IN') : '-'}</dd></div>
                                 <div><dt className="text-xs font-medium text-slate-500">{t('Last updated')}</dt><dd className="mt-1 text-slate-900">{item.updated_at ? new Date(item.updated_at).toLocaleString(language === 'hi' ? 'hi-IN' : 'en-IN') : '-'}</dd></div>
                               </dl>
@@ -551,6 +622,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
               </table>
             </div>
           )}
+          </>}
         </div>
       </div>
     </div>
