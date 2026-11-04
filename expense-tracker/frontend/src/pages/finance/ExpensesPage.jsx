@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, PencilLine, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { useLanguage } from '../../context/LanguageContext';
 import ExpenseShareActions from '../../components/ExpenseShareActions';
@@ -10,6 +10,7 @@ const paymentOptions = ['Cash', 'UPI', 'Debit Card', 'Credit Card', 'Net Banking
 export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const { language, t } = useLanguage();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const entryId = searchParams.get('entry');
   const localizedMoney = useMemo(() => new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }), [language]);
   const localizedPreciseMoney = useMemo(() => new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }), [language]);
@@ -23,8 +24,9 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
   const [saving, setSaving] = useState(false);
   const [suggestingCategory, setSuggestingCategory] = useState(false);
   const [aiConsent, setAiConsent] = useState(false);
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedHistoryKeys, setSelectedHistoryKeys] = useState([]);
   const [expandedExpenseId, setExpandedExpenseId] = useState(null);
+  const [settlingIds, setSettlingIds] = useState([]);
   const [historyVisible, setHistoryVisible] = useState(false);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
@@ -99,11 +101,12 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
     }
   }, [historyExpenses, query, sort, dateFrom, dateTo, categoryFilter, categories]);
   const linkedExpense = expenses.find((item) => String(item.id) === entryId);
-  const selectedExpenses = expenses.filter((item) => selectedIds.includes(item.id));
+  const selectedHistory = historyExpenses.filter((item) => selectedHistoryKeys.includes(item.historyKey));
+  const selectedPersonalExpenses = selectedHistory.filter((item) => item.historyType === 'Personal');
   const bulkShareMessage = [
     '💰 MoneyMind Expense Summary',
     '',
-    ...selectedExpenses.map((item) => `${item.date} · ${item.description || item.category_name}: ${localizedPreciseMoney.format(Number(item.amount))}`),
+    ...selectedHistory.map((item) => `${item.historyType} · ${item.date} · ${item.description || item.category_name}: ${localizedPreciseMoney.format(Number(item.amount))}`),
     '',
     'Manage Money. Master Your Future.',
     'Shared via MoneyMind.',
@@ -210,15 +213,17 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
     }
   };
 
-  const toggleSelected = (id) => setSelectedIds((current) => (
-    current.includes(id) ? current.filter((selectedId) => selectedId !== id) : [...current, id]
+  const toggleSelected = (historyKey) => setSelectedHistoryKeys((current) => (
+    current.includes(historyKey) ? current.filter((selectedKey) => selectedKey !== historyKey) : [...current, historyKey]
   ));
 
+  const visibleHistoryKeys = filteredExpenses.map((item) => item.historyKey);
+  const allVisibleSelected = visibleHistoryKeys.length > 0
+    && visibleHistoryKeys.every((key) => selectedHistoryKeys.includes(key));
   const selectVisible = () => {
-    const visibleIds = filteredExpenses.filter((item) => item.historyType === 'Personal').map((item) => item.id);
-    setSelectedIds((current) => visibleIds.every((id) => current.includes(id))
-      ? current.filter((id) => !visibleIds.includes(id))
-      : [...new Set([...current, ...visibleIds])]);
+    setSelectedHistoryKeys((current) => allVisibleSelected
+      ? current.filter((key) => !visibleHistoryKeys.includes(key))
+      : [...new Set([...current, ...visibleHistoryKeys])]);
   };
 
   const handleAddPerson = async (e) => {
@@ -281,6 +286,30 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
       loadData();
     } catch {
       setError('Unable to delete expense.');
+    }
+  };
+
+  const handleDeleteGroup = async (id) => {
+    if (!window.confirm(t('Delete this group expense and its settlement records?'))) return;
+    try {
+      await api.delete(`/group-expenses/${id}/`);
+      onExpenseChange();
+      await loadData();
+    } catch {
+      setError('Unable to delete group expense.');
+    }
+  };
+
+  const handleSettle = async (settlementId) => {
+    setSettlingIds((current) => [...current, settlementId]);
+    try {
+      await api.post(`/settlements/${settlementId}/mark-settled/`);
+      onExpenseChange();
+      await loadData();
+    } catch {
+      setError('Unable to update settlement.');
+    } finally {
+      setSettlingIds((current) => current.filter((id) => id !== settlementId));
     }
   };
 
@@ -479,10 +508,12 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Search expenses')} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm text-slate-900 focus:border-indigo-400" />
             </div>
-            {selectedExpenses.length > 0 && (
+            {selectedHistory.length > 0 && (
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                <p className="text-sm font-medium text-emerald-950">{selectedExpenses.length} {t('expenses selected')}</p>
-                <ExpenseShareActions expense={selectedExpenses[0]} compact buttonLabel="Review and share on WhatsApp" messageOverride={bulkShareMessage} />
+                <p className="text-sm font-medium text-emerald-950">{selectedHistory.length} {t('expenses selected')}</p>
+                {selectedPersonalExpenses.length > 0 && (
+                  <ExpenseShareActions expense={selectedPersonalExpenses[0]} compact buttonLabel="Review and share on WhatsApp" messageOverride={bulkShareMessage} />
+                )}
               </div>
             )}
             <select value={sort} onChange={(e) => setSort(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 focus:border-indigo-400">
@@ -518,7 +549,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
               <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    <th className="px-3 py-3"><button type="button" onClick={selectVisible} className="text-xs font-semibold">{t('Select visible')}</button></th>
+                    <th className="px-3 py-3"><button type="button" onClick={selectVisible} aria-pressed={allVisibleSelected} className="text-xs font-semibold">{t(allVisibleSelected ? 'Deselect visible' : 'Select visible')}</button></th>
                     <th className="px-3 py-3">{t('Date')}</th>
                     <th className="px-3 py-3">{t('Category')}</th>
                     <th className="px-3 py-3">{t('Paid by')}</th>
@@ -539,7 +570,7 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                       <Fragment key={item.historyKey}>
                         <tr className="border-t border-slate-200">
                           <td className="px-3 py-3">
-                            {item.historyType === 'Personal' && <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleSelected(item.id)} aria-label={`${t('Select expense')} ${item.description || item.category_name}`} />}
+                            <input type="checkbox" checked={selectedHistoryKeys.includes(item.historyKey)} onChange={() => toggleSelected(item.historyKey)} aria-label={`${t('Select expense')} ${item.description || item.category_name}`} />
                           </td>
                           <td className="px-3 py-3">{item.date}</td>
                           <td className="px-3 py-3">{item.category_name}</td>
@@ -559,15 +590,36 @@ export default function ExpensesPage({ onExpenseChange = () => {} }) {
                           <td className="px-3 py-3">{item.merchant_name || '-'}</td>
                           <td className="px-3 py-3 whitespace-pre-wrap">{item.notes || '-'}</td>
                           <td className="px-3 py-3 font-semibold text-slate-900">{localizedMoney.format(Number(item.amount))}</td>
-                          <td className="px-3 py-3">{item.payment_method || '-'}</td>
+                          <td className="px-3 py-3">
+                            {item.historyType === 'Personal' ? item.payment_method || '-' : (
+                              <div className="flex flex-col items-start gap-1">
+                                {(item.settlements || []).length === 0 && <span className="text-xs text-slate-500">{t('No settlement required.')}</span>}
+                                {(item.settlements || []).map((settlement) => settlement.status === 'SETTLED' ? (
+                                  <span key={settlement.id} className="text-xs font-medium text-emerald-700">{settlement.from} → {settlement.to}: {t('Settled')}</span>
+                                ) : (
+                                  <button key={settlement.id} type="button" onClick={() => handleSettle(settlement.id)} disabled={settlingIds.includes(settlement.id)}
+                                    className="min-h-8 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50">
+                                    {settlingIds.includes(settlement.id) ? t('Saving...') : `${t('Mark paid')}: ${settlement.from} → ${settlement.to}`}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </td>
                           <td className="px-3 py-3">
                             <div className="flex justify-end gap-2">
-                              {item.historyType === 'Personal' && <>
+                              {item.historyType === 'Personal' ? <>
                                 <ExpenseShareActions expense={item} compact />
                                 <button type="button" onClick={() => handleEdit(item)} className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50" aria-label={t('Edit expense')}>
                                   <PencilLine className="h-4 w-4" />
                                 </button>
                                 <button type="button" onClick={() => handleDelete(item.id)} className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100" aria-label={t('Delete expense')}>
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </> : <>
+                                <button type="button" onClick={() => navigate(`/expenses?view=group&edit=${item.id}`)} className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50" aria-label={`${t('Edit expense')}: ${item.description}`}>
+                                  <PencilLine className="h-4 w-4" />
+                                </button>
+                                <button type="button" onClick={() => handleDeleteGroup(item.id)} className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100" aria-label={`${t('Delete expense')}: ${item.description}`}>
                                   <Trash2 className="h-4 w-4" />
                                 </button>
                               </>}

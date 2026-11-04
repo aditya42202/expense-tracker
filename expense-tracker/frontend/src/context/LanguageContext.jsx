@@ -102,6 +102,8 @@ const hindi = {
   'Search expenses': 'खर्च खोजें', Newest: 'नए पहले', Oldest: 'पुराने पहले', 'Highest amount': 'सबसे बड़ी राशि', 'Lowest amount': 'सबसे छोटी राशि',
   'Loading expenses...': 'खर्च लोड हो रहे हैं...', 'Add your first expense to start tracking spending.': 'हिसाब शुरू करने के लिए पहला खर्च जोड़ें।',
   'Unable to delete expense.': 'खर्च हटाया नहीं जा सका।',
+  'Unable to update settlement.': 'भुगतान की स्थिति अपडेट नहीं हो सकी।',
+  'Deselect visible': 'दिख रहे खर्च हटाएँ',
   ' expense on ': ' खर्च दिनांक ', ' expenses on ': ' खर्च दिनांक ', expense: 'खर्च', expenses: 'खर्च',
   'Spent': 'खर्च', 'Set budget': 'बजट तय करें', 'Budget amount': 'बजट की राशि',
   'Save monthly budget': 'मासिक बजट सहेजें', 'Category budgets': 'श्रेणी के बजट',

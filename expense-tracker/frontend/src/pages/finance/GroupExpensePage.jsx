@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ArrowRight, Check, PencilLine, Plus, ReceiptText, Trash2, Users } from 'lucide-react';
 import api from '../../services/api';
 import { useLanguage } from '../../context/LanguageContext';
@@ -10,6 +11,8 @@ const blankForm = () => ({ title: '', amount: '', date: today, category: '', par
 
 export default function GroupExpensePage({ onExpenseChange = () => {}, formOnly = false }) {
   const { language, t } = useLanguage();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedEditId = searchParams.get('edit');
   const money = new Intl.NumberFormat(language === 'hi' ? 'hi-IN' : 'en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const [members, setMembers] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -103,7 +106,7 @@ export default function GroupExpensePage({ onExpenseChange = () => {}, formOnly 
     }
   };
 
-  const editExpense = (expense) => {
+  const editExpense = useCallback((expense) => {
     const participants = expense.participant_details || [];
     setForm({
       id: expense.id,
@@ -117,7 +120,17 @@ export default function GroupExpensePage({ onExpenseChange = () => {}, formOnly 
     setError('');
     setMessage('');
     document.getElementById('group-expense-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!requestedEditId) return;
+    const expense = expenses.find((item) => String(item.id) === requestedEditId);
+    if (!expense) return;
+    editExpense(expense);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('edit');
+    setSearchParams(nextParams, { replace: true });
+  }, [requestedEditId, expenses, editExpense, searchParams, setSearchParams]);
 
   const cancelEdit = () => {
     setForm({ ...blankForm(), participants: members.map((item) => item.id), payers: [{ member: members[0]?.id || '', amount: '' }] });
