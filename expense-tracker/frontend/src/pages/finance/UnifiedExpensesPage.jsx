@@ -49,6 +49,7 @@ export default function UnifiedExpensesPage() {
   const [loading, setLoading] = useState(true);
   const [summaryError, setSummaryError] = useState('');
   const [summaryVersion, setSummaryVersion] = useState(0);
+  const [dailyEntryType, setDailyEntryType] = useState('daily');
 
   useEffect(() => {
     let active = true;
@@ -305,7 +306,21 @@ export default function UnifiedExpensesPage() {
         ))}
       </nav>
 
-      {activeView === 'daily' && <DailyExpensesPage onExpenseChange={refreshSummary} />}
+      {activeView === 'daily' && <>
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1" role="group" aria-label={t('Choose expense type')}>
+          <button type="button" onClick={() => setDailyEntryType('daily')} aria-pressed={dailyEntryType === 'daily'}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${dailyEntryType === 'daily' ? 'bg-[#173d32] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            {t('Add daily expense')}
+          </button>
+          <button type="button" onClick={() => setDailyEntryType('group')} aria-pressed={dailyEntryType === 'group'}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${dailyEntryType === 'group' ? 'bg-[#173d32] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            {t('Add group expense')}
+          </button>
+        </div>
+        {dailyEntryType === 'daily'
+          ? <DailyExpensesPage onExpenseChange={refreshSummary} />
+          : <GroupExpensePage onExpenseChange={refreshSummary} formOnly />}
+      </>}
       {activeView === 'ledger' && <ExpensesPage onExpenseChange={refreshSummary} />}
       {activeView === 'group' && <GroupExpensePage onExpenseChange={refreshSummary} />}
     </div>

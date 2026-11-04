@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import api from '../../services/api';
 import createIdempotencyKey from '../../services/idempotency';
 import { useLanguage } from '../../context/LanguageContext';
@@ -126,7 +125,7 @@ export default function DailyExpensesPage({ onExpenseChange = () => {} }) {
     <div className="space-y-6">
       <div className="rounded-2xl bg-linear-to-r from-indigo-600 to-violet-600 p-6 text-white shadow-lg">
         <p className="text-sm uppercase tracking-[0.2em] text-indigo-100">{t('Daily Expense')}</p>
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><h1 className="mt-2 text-3xl font-bold">{t('Track today’s spending')}</h1><p className="mt-2 text-sm text-indigo-100">{t('Personal expense ya group expense, dono yahin se add karein.')}</p></div><Link to="/group-expenses" className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50">{t('Add group expense')}</Link></div>
+        <div><h1 className="mt-2 text-3xl font-bold">{t('Track today’s spending')}</h1><p className="mt-2 text-sm text-indigo-100">{t('Personal expense ya group expense, dono yahin se add karein.')}</p></div>
       </div>
 
       <div className="grid min-w-0 gap-6 lg:grid-cols-[1.2fr,0.8fr]">
