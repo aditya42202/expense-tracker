@@ -33,6 +33,7 @@ class Membership(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="new_group_memberships")
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default="member")
     is_active = models.BooleanField(default=True)
+    is_blocked = models.BooleanField(default=False)
     joined_at = models.DateTimeField(auto_now_add=True)
     last_read_at = models.DateTimeField(null=True, blank=True)
 
@@ -133,4 +134,25 @@ class ChatMessage(models.Model):
                 condition=models.Q(message_type="EXPENSE"),
                 name="groups_unique_shared_expense_message",
             ),
+        ]
+
+
+class ChatReaction(models.Model):
+    message = models.ForeignKey(ChatMessage, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="group_chat_reactions")
+    emoji = models.CharField(max_length=8)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["message", "user"], name="groups_unique_chat_reaction"),
+        ]
+
+
+class HiddenChatMessage(models.Model):
+    message = models.ForeignKey(ChatMessage, on_delete=models.CASCADE, related_name="hidden_by")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="hidden_group_chat_messages")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["message", "user"], name="groups_unique_hidden_chat_message"),
         ]

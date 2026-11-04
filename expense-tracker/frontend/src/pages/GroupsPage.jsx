@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, MessageCircle, Plus, ReceiptText, RefreshCw, Send, Share2, Sparkles, Users, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Ban, MessageCircle, Plus, ReceiptText, RefreshCw, Send, Share2, Sparkles, Trash2, Users, Wallet } from 'lucide-react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 const today = new Date().toISOString().slice(0, 10);
-const emptyExpense = () => ({ title: '', amount: '', date: today, category: '', split_type: 'equal' });
+const emptyExpense = () => ({ id: null, title: '', amount: '', date: today, category: '', split_type: 'equal' });
+const chatReactionChoices = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
+const canDeleteForEveryone = (message) => Date.now() < new Date(message.created_at).getTime() + 60 * 60 * 1000;
+const canEditExpense = (expense) => Date.now() < new Date(expense.created_at).getTime() + 30 * 60 * 1000;
 const mergeMessages = (current, incoming) => {
   const messagesById = new Map(current.map((message) => [message.id, message]));
   incoming.forEach((message) => messagesById.set(message.id, message));
@@ -59,6 +62,7 @@ export default function GroupsPage() {
   const [chatRefreshingGroupId, setChatRefreshingGroupId] = useState('');
   const [chatLoading, setChatLoading] = useState(true);
   const [chatSendingGroupId, setChatSendingGroupId] = useState('');
+  const [chatActionMessageId, setChatActionMessageId] = useState(null);
   const [olderLoadingGroupId, setOlderLoadingGroupId] = useState('');
   const [chatMessagesGroupId, setChatMessagesGroupId] = useState('');
   const [chatErrorState, setChatErrorState] = useState({ groupId: '', message: '' });
@@ -344,6 +348,69 @@ export default function GroupsPage() {
     }
   };
 
+  const setMemberBlocked = async (member) => {
+    try {
+      await api.patch(`/groups/${groupId}/members/${member.id}/`, { is_blocked: !member.is_blocked });
+      await loadGroups();
+      setNotice(member.is_blocked ? `${member.name} can send messages again.` : `${member.name} is blocked from sending messages.`);
+      setError('');
+    } catch (memberError) {
+      setError(displayError(memberError, 'Unable to update this member.'));
+    }
+  };
+
+  const removeMember = async (member) => {
+    if (!window.confirm(member.user_id === user?.id ? 'Leave this group?' : `Remove ${member.name} from this group?`)) return;
+    try {
+      await api.delete(`/groups/${groupId}/members/${member.id}/`);
+      await loadGroups();
+      setNotice(member.user_id === user?.id ? 'You left the group.' : `${member.name} was removed from the group.`);
+      setError('');
+    } catch (memberError) {
+      setError(displayError(memberError, 'Unable to remove this member.'));
+    }
+  };
+
+  const clearChat = async () => {
+    if (!window.confirm('Delete every message in this group chat for everyone? This cannot be undone.')) return;
+    try {
+      await api.delete(`/groups/${groupId}/chat/clear/`);
+      setMessages([]);
+      setOlderBefore(null);
+      setNotice('Group chat cleared for everyone.');
+      setError('');
+    } catch (clearError) {
+      setError(displayError(clearError, 'Unable to clear this group chat.'));
+    }
+  };
+
+  const deleteChatMessage = async (message, forEveryone) => {
+    if (forEveryone && !window.confirm('Delete this message for everyone?')) return;
+    setChatActionMessageId(message.id);
+    try {
+      await api.post(`/groups/${groupId}/chat/${message.id}/delete/`, { for_everyone: forEveryone });
+      setMessages((current) => current.filter((item) => item.id !== message.id));
+      setError('');
+    } catch (deleteError) {
+      setError(displayError(deleteError, 'Unable to delete this message.'));
+    } finally {
+      setChatActionMessageId(null);
+    }
+  };
+
+  const reactToMessage = async (message, emoji) => {
+    setChatActionMessageId(message.id);
+    try {
+      const { data } = await api.post(`/groups/${groupId}/chat/${message.id}/reaction/`, { emoji });
+      setMessages((current) => current.map((item) => item.id === message.id ? data : item));
+      setError('');
+    } catch (reactionError) {
+      setError(displayError(reactionError, 'Unable to add this reaction.'));
+    } finally {
+      setChatActionMessageId(null);
+    }
+  };
+
   const createInvite = async () => {
     setInviteLoading(true);
     try {
@@ -412,18 +479,39 @@ export default function GroupsPage() {
       .filter(([, amount]) => Number(amount) > 0)
       .map(([membership_id, amount]) => ({ membership_id: Number(membership_id), amount: Number(amount) }));
     if (!payments.length && myMembership && total > 0) payments.push({ membership_id: myMembership.id, amount: total });
+    const { id, ...expenseData } = expenseForm;
     try {
-      await api.post(`/groups/${groupId}/expenses/`, { ...expenseForm, amount: total, shares, payments });
+      if (id) {
+        await api.patch(`/groups/${groupId}/expenses/${id}/`, { ...expenseData, amount: total, shares, payments });
+      } else {
+        await api.post(`/groups/${groupId}/expenses/`, { ...expenseData, amount: total, shares, payments });
+      }
       setExpenseForm(emptyExpense());
       setCustomShares({});
       setPercentageShares({});
       setPayerAmounts({});
       await loadWorkspace(groupId);
-      setNotice('Shared expense added.');
+      setNotice(id ? 'Shared expense updated.' : 'Shared expense added.');
       setError('');
     } catch (saveError) {
       setError(displayError(saveError, 'Unable to add this expense.'));
     }
+  };
+
+  const editExpense = (expense) => {
+    if (!canEditExpense(expense)) return;
+    setExpenseForm({
+      id: expense.id,
+      title: expense.title,
+      amount: expense.amount,
+      date: expense.date,
+      category: expense.category,
+      split_type: expense.split_type,
+    });
+    setCustomShares(Object.fromEntries(expense.shares.map((share) => [share.membership_id, share.amount])));
+    setPercentageShares(Object.fromEntries(expense.shares.map((share) => [share.membership_id, share.percentage || ''])));
+    setPayerAmounts(Object.fromEntries(expense.payments.map((payment) => [payment.membership_id, payment.amount])));
+    document.getElementById('shared-expense-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   const deleteExpense = async (id) => {
@@ -609,7 +697,7 @@ export default function GroupsPage() {
               {groups.map((group) => <option key={group.id} value={group.id}>{group.name}{group.unread_count ? ` (${group.unread_count} unread)` : ''}</option>)}
               {!groups.length && <option value="">No groups yet</option>}
             </select>
-            {selectedGroup && <div className="mt-3 space-y-2">{members.map((member, index) => <div key={member.id} className="flex items-center justify-between gap-2 rounded-xl bg-violet-50/60 px-2.5 py-2"><span className="flex min-w-0 items-center gap-2"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${index % 2 ? 'bg-sky-500' : 'bg-violet-500'}`}>{member.name?.charAt(0)?.toUpperCase()}</span><span className="min-w-0 truncate text-xs font-semibold text-slate-800">{member.name}<span className="block truncate text-[10px] font-normal text-slate-500">{member.email}</span></span></span><span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{member.role}</span></div>)}</div>}
+            {selectedGroup && <div className="mt-3 space-y-2">{members.map((member, index) => <div key={member.id} className="rounded-xl bg-violet-50/60 px-2.5 py-2"><div className="flex items-center justify-between gap-2"><span className="flex min-w-0 items-center gap-2"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${index % 2 ? 'bg-sky-500' : 'bg-violet-500'}`}>{member.name?.charAt(0)?.toUpperCase()}</span><span className="min-w-0 truncate text-xs font-semibold text-slate-800">{member.name}<span className="block truncate text-[10px] font-normal text-slate-500">{member.email}</span></span></span><span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{member.role}</span></div><div className="mt-2 flex flex-wrap gap-2">{myMembership?.role === 'admin' && member.role !== 'admin' && <button type="button" onClick={() => setMemberBlocked(member)} className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-white px-2 py-1 text-[10px] font-semibold text-amber-800"><Ban className="h-3 w-3" />{member.is_blocked ? 'Unblock' : 'Block'}</button>}{(myMembership?.role === 'admin' && member.role !== 'admin' || member.user_id === user?.id) && <button type="button" onClick={() => removeMember(member)} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2 py-1 text-[10px] font-semibold text-rose-700"><Trash2 className="h-3 w-3" />{member.user_id === user?.id ? 'Leave group' : 'Remove'}</button>}{member.is_blocked && <span className="self-center text-[10px] font-semibold text-rose-600">Blocked from chat</span>}</div></div>)}</div>}
           </section>
 
           <form onSubmit={createGroup} className="space-y-3 rounded-2xl border border-violet-100 bg-white p-4 shadow-sm shadow-violet-100/70">
@@ -680,15 +768,16 @@ export default function GroupsPage() {
           </section>
 
           <div className="grid items-start gap-4 xl:grid-cols-2">
-            <form onSubmit={createExpense} className="space-y-3 rounded-2xl border border-violet-100 bg-white p-4 shadow-sm shadow-violet-100/70">
-              <div className="flex items-center justify-between gap-3"><h2 className="flex items-center gap-2 text-sm font-bold text-slate-900"><ReceiptText className="h-4 w-4 text-violet-700" />Add shared expense</h2><span className="rounded-full bg-violet-100 px-3 py-1 text-[11px] font-bold text-violet-800">{money.format(groupTotal)} total</span></div>
+            <form id="shared-expense-form" onSubmit={createExpense} className="space-y-3 rounded-2xl border border-violet-100 bg-white p-4 shadow-sm shadow-violet-100/70">
+              <div className="flex items-center justify-between gap-3"><h2 className="flex items-center gap-2 text-sm font-bold text-slate-900"><ReceiptText className="h-4 w-4 text-violet-700" />{expenseForm.id ? 'Edit shared expense' : 'Add shared expense'}</h2><span className="rounded-full bg-violet-100 px-3 py-1 text-[11px] font-bold text-violet-800">{money.format(groupTotal)} total</span></div>
               <input required maxLength={200} value={expenseForm.title} onChange={(event) => setExpenseForm({ ...expenseForm, title: event.target.value })} placeholder="What was it for?" className="w-full rounded-xl border border-violet-200 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none" />
               <div className="grid grid-cols-2 gap-2"><input type="number" step="0.01" min="0.01" required value={expenseForm.amount} onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })} placeholder="Amount (₹)" className="min-w-0 rounded-xl border border-violet-200 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none" /><input type="date" aria-label="Expense date" required value={expenseForm.date} onChange={(event) => setExpenseForm({ ...expenseForm, date: event.target.value })} className="min-w-0 rounded-xl border border-violet-200 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none" /></div>
               <div className="grid grid-cols-2 gap-2"><input value={expenseForm.category} onChange={(event) => setExpenseForm({ ...expenseForm, category: event.target.value })} placeholder="Category" className="min-w-0 rounded-xl border border-violet-200 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none" /><select aria-label="Split type" value={expenseForm.split_type} onChange={(event) => setExpenseForm({ ...expenseForm, split_type: event.target.value })} className="min-w-0 rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm"><option value="equal">Split equally</option><option value="custom">Custom amounts</option><option value="percentage">Percentages</option></select></div>
               {expenseForm.split_type !== 'equal' && <div className="space-y-2 rounded-xl bg-violet-50 p-3"><p className="text-xs font-semibold text-slate-600">{expenseForm.split_type === 'custom' ? 'Share amounts (must add to total)' : 'Shares (must total 100%)'}</p>{members.map((member) => <label key={member.id} className="flex items-center justify-between gap-3 text-sm"><span>{member.name}</span><input type="number" step={expenseForm.split_type === 'custom' ? '0.01' : '0.001'} min="0" value={(expenseForm.split_type === 'custom' ? customShares : percentageShares)[member.id] || ''} onChange={(event) => updateSplitInput(member.id, event.target.value)} placeholder={expenseForm.split_type === 'custom' ? '₹ amount' : '%'} className="w-28 rounded-lg border border-violet-200 px-2 py-1.5 text-right" /></label>)}</div>}
               <details className="rounded-xl bg-violet-50 p-3"><summary className="cursor-pointer text-sm font-semibold text-slate-800">Who paid? (defaults to you)</summary><div className="mt-3 space-y-2">{members.map((member) => <label key={member.id} className="flex items-center justify-between gap-3 text-sm"><span>{member.name}</span><input type="number" step="0.01" min="0" value={payerAmounts[member.id] || ''} onChange={(event) => setPayerAmounts({ ...payerAmounts, [member.id]: event.target.value })} placeholder="₹ paid" className="w-28 rounded-lg border border-violet-200 px-2 py-1.5 text-right" /></label>)}</div></details>
-              <button className="w-full rounded-xl bg-linear-to-r from-violet-700 to-fuchsia-600 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-violet-200 hover:brightness-105">Save expense</button>
-              {expenses.length > 0 && <div className="space-y-2 border-t border-violet-100 pt-3"><h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Recent shared expenses</h3>{expenses.map((expense) => <article id={`group-expense-${expense.id}`} key={expense.id} className="flex items-start justify-between gap-3 rounded-xl border border-violet-100 bg-violet-50/40 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-900">{expense.title}</p><p className="text-xs text-slate-500">{expense.date} · {expense.category || 'Shared'} · {expense.split_type}</p><p className="mt-1 text-xs text-slate-500">{expense.shares.map((share) => `${share.name}: ${money.format(Number(share.amount))}`).join(' · ')}</p></div><div className="shrink-0 text-right"><p className="text-sm font-bold text-slate-900">{money.format(Number(expense.amount))}</p><div className="mt-2 flex flex-wrap justify-end gap-2"><button onClick={() => shareExpenseToChat(expense)} type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-violet-700"><MessageCircle className="h-3.5 w-3.5" /> Share to chat</button><button onClick={() => previewExpenseShare(expense)} type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700"><Share2 className="h-3.5 w-3.5" /> WhatsApp</button><button onClick={() => deleteExpense(expense.id)} type="button" className="text-xs font-semibold text-rose-600">Delete</button></div></div></article>)}</div>}
+              <button className="w-full rounded-xl bg-linear-to-r from-violet-700 to-fuchsia-600 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-violet-200 hover:brightness-105">{expenseForm.id ? 'Save changes' : 'Save expense'}</button>
+              {expenseForm.id && <button type="button" onClick={() => { setExpenseForm(emptyExpense()); setCustomShares({}); setPercentageShares({}); setPayerAmounts({}); }} className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Cancel editing</button>}
+              {expenses.length > 0 && <div className="space-y-2 border-t border-violet-100 pt-3"><h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Recent shared expenses</h3>{expenses.map((expense) => <article id={`group-expense-${expense.id}`} key={expense.id} className="flex items-start justify-between gap-3 rounded-xl border border-violet-100 bg-violet-50/40 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-900">{expense.title}</p><p className="text-xs text-slate-500">{expense.date} · {expense.category || 'Shared'} · {expense.split_type}</p><p className="mt-1 text-xs text-slate-500">{expense.shares.map((share) => `${share.name}: ${money.format(Number(share.amount))}`).join(' · ')}</p><p className="mt-1 text-[10px] text-slate-500">{canEditExpense(expense) ? 'Editable for 30 minutes after creation' : 'Edit period ended'}</p></div><div className="shrink-0 text-right"><p className="text-sm font-bold text-slate-900">{money.format(Number(expense.amount))}</p><div className="mt-2 flex flex-wrap justify-end gap-2">{canEditExpense(expense) && <button onClick={() => editExpense(expense)} type="button" className="text-xs font-semibold text-indigo-700">Edit</button>}<button onClick={() => shareExpenseToChat(expense)} type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-violet-700"><MessageCircle className="h-3.5 w-3.5" /> Share to chat</button><button onClick={() => previewExpenseShare(expense)} type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700"><Share2 className="h-3.5 w-3.5" /> WhatsApp</button><button onClick={() => deleteExpense(expense.id)} type="button" className="text-xs font-semibold text-rose-600">Delete</button></div></div></article>)}</div>}
             </form>
 
             <section className="rounded-2xl border border-violet-100 bg-white p-4 shadow-sm shadow-violet-100/70">
@@ -710,16 +799,16 @@ export default function GroupsPage() {
             </section>
 
             <section className="flex min-h-72 flex-col overflow-hidden rounded-2xl border border-violet-100 bg-white shadow-sm shadow-violet-100/70">
-                <header className="flex items-center justify-between border-b border-violet-100 px-4 py-3"><div className="flex items-center gap-2"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-100"><MessageCircle className="h-5 w-5 text-violet-700" /></span><div><h2 className="text-sm font-bold text-slate-900">Group Chat</h2><p className="text-[10px] text-slate-500">Messages are saved · live updates</p></div></div><button type="button" onClick={() => refreshChat(true)} disabled={chatRefreshing || chatLoading} className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-2.5 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50 disabled:cursor-wait disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${chatRefreshing ? 'animate-spin' : ''}`} />{chatRefreshing ? 'Refreshing…' : 'Refresh'}</button></header>
+                <header className="flex items-center justify-between border-b border-violet-100 px-4 py-3"><div className="flex items-center gap-2"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-100"><MessageCircle className="h-5 w-5 text-violet-700" /></span><div><h2 className="text-sm font-bold text-slate-900">Group Chat</h2><p className="text-[10px] text-slate-500">Messages are saved · live updates</p></div></div><div className="flex items-center gap-2">{myMembership?.role === 'admin' && <button type="button" onClick={clearChat} className="flex items-center gap-1.5 rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" />Clear chat</button>}<button type="button" onClick={() => refreshChat(true)} disabled={chatRefreshing || chatLoading} className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-2.5 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50 disabled:cursor-wait disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${chatRefreshing ? 'animate-spin' : ''}`} />{chatRefreshing ? 'Refreshing…' : 'Refresh'}</button></div></header>
                 <div className="flex-1 space-y-3 overflow-y-auto bg-linear-to-b from-violet-50/50 to-white p-3">
                   {chatError && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{chatError} <button type="button" onClick={() => loadChat(groupId)} disabled={chatLoading} className="ml-2 font-semibold underline">{chatLoading ? 'Retrying…' : 'Retry'}</button></div>}
                   {visibleOlderBefore && <button onClick={loadOlderMessages} disabled={olderLoading} className="w-full rounded-lg bg-slate-50 py-2 text-xs font-medium text-indigo-700 disabled:opacity-50">{olderLoading ? 'Loading older messages…' : 'Load older messages'}</button>}
                   {chatLoading && !visibleMessages.length && <p className="py-12 text-center text-sm text-slate-500">Loading chat…</p>}
                   {!chatLoading && !visibleMessages.length && !chatError && <p className="py-12 text-center text-sm text-slate-500">No messages yet. Start the conversation.</p>}
-                  {visibleMessages.map((message) => <div key={message.id} className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm shadow-sm ${message.sender_id === user?.id ? 'ml-auto bg-linear-to-r from-violet-700 to-fuchsia-600 text-white' : 'bg-white text-slate-800 ring-1 ring-violet-100'}`}><p className="mb-1 text-xs font-semibold opacity-75">{message.sender_name}</p>{message.message_type === 'EXPENSE' ? <div className="rounded-xl border border-current/15 bg-white/10 p-3"><p className="font-semibold">{message.expense_title || message.text}</p>{message.expense_amount && <p className="mt-1">{money.format(Number(message.expense_amount))}</p>}{message.expense_id && <button type="button" onClick={() => openChatExpense(message.expense_id)} className="mt-2 rounded-lg bg-white/20 px-3 py-1.5 text-xs font-semibold underline">View expense</button>}</div> : <p className="whitespace-pre-wrap wrap-break-word">{message.text}</p>}<time className="mt-1 block text-right text-[10px] opacity-70">{new Date(message.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</time></div>)}
+                  {visibleMessages.map((message) => <div key={message.id} className={`max-w-[88%] ${message.sender_id === user?.id ? 'ml-auto' : ''}`}><div className={`rounded-2xl px-3 py-2 text-sm shadow-sm ${message.sender_id === user?.id ? 'bg-linear-to-r from-violet-700 to-fuchsia-600 text-white' : 'bg-white text-slate-800 ring-1 ring-violet-100'}`}><p className="mb-1 text-xs font-semibold opacity-75">{message.sender_name}</p>{message.message_type === 'EXPENSE' ? <div className="rounded-xl border border-current/15 bg-white/10 p-3"><p className="font-semibold">{message.expense_title || message.text}</p>{message.expense_amount && <p className="mt-1">{money.format(Number(message.expense_amount))}</p>}{message.expense_id && <button type="button" onClick={() => openChatExpense(message.expense_id)} className="mt-2 rounded-lg bg-white/20 px-3 py-1.5 text-xs font-semibold underline">View expense</button>}</div> : <p className="whitespace-pre-wrap wrap-break-word">{message.text}</p>}<time className="mt-1 block text-right text-[10px] opacity-70">{new Date(message.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</time></div><div className="mt-1 flex flex-wrap items-center gap-1">{chatReactionChoices.map((emoji) => { const reaction = message.reactions?.find((item) => item.emoji === emoji); return <button key={emoji} type="button" disabled={chatActionMessageId === message.id} aria-label={`React ${emoji}`} aria-pressed={Boolean(reaction?.reacted_by_me)} onClick={() => reactToMessage(message, emoji)} className={`rounded-full border px-2 py-0.5 text-xs disabled:opacity-50 ${reaction?.reacted_by_me ? 'border-violet-400 bg-violet-100' : 'border-slate-200 bg-white'}`}>{emoji}{reaction ? ` ${reaction.count}` : ''}</button>; })}<button type="button" disabled={chatActionMessageId === message.id} onClick={() => deleteChatMessage(message, false)} className="ml-auto rounded-lg px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-white">Delete for me</button>{message.sender_id === user?.id && canDeleteForEveryone(message) && <button type="button" disabled={chatActionMessageId === message.id} onClick={() => deleteChatMessage(message, true)} className="rounded-lg px-2 py-1 text-[10px] font-semibold text-rose-700 hover:bg-rose-50">Delete for everyone</button>}</div></div>)}
                   <div ref={chatEndRef} />
                 </div>
-                <form onSubmit={sendMessage} className="flex gap-2 border-t border-violet-100 bg-white p-3"><textarea maxLength={2000} rows={1} value={messageText} onChange={(event) => setMessageDraft({ groupId: String(groupId), text: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(event); } }} placeholder="Write a message…" className="min-w-0 flex-1 resize-y rounded-xl border border-violet-200 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none" /><button disabled={!messageText.trim() || chatSending} aria-label="Send message" className="flex items-center gap-2 rounded-xl bg-linear-to-r from-violet-700 to-fuchsia-600 px-4 text-white shadow-sm disabled:opacity-40">{chatSending ? 'Sending…' : <Send className="h-4 w-4" />}</button></form>
+                {myMembership?.is_blocked ? <p className="border-t border-rose-100 bg-rose-50 p-3 text-center text-sm font-medium text-rose-700">You are blocked from sending messages in this group.</p> : <form onSubmit={sendMessage} className="flex gap-2 border-t border-violet-100 bg-white p-3"><textarea maxLength={2000} rows={1} value={messageText} onChange={(event) => setMessageDraft({ groupId: String(groupId), text: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(event); } }} placeholder="Write a message…" className="min-w-0 flex-1 resize-y rounded-xl border border-violet-200 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none" /><button disabled={!messageText.trim() || chatSending} aria-label="Send message" className="flex items-center gap-2 rounded-xl bg-linear-to-r from-violet-700 to-fuchsia-600 px-4 text-white shadow-sm disabled:opacity-40">{chatSending ? 'Sending…' : <Send className="h-4 w-4" />}</button></form>}
               </section>
           </div>
         </div> : <section className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm"><Users className="mx-auto h-10 w-10 text-indigo-400" /><h2 className="mt-3 text-xl font-semibold">Your shared space starts here</h2><p className="mt-1 text-sm text-slate-500">Create a group or join using an invite token.</p></section>}

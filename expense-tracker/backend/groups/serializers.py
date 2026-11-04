@@ -10,7 +10,7 @@ class MembershipSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Membership
-        fields = ["id", "user_id", "name", "email", "role", "joined_at"]
+        fields = ["id", "user_id", "name", "email", "role", "is_blocked", "joined_at"]
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -33,8 +33,8 @@ class GroupSerializer(serializers.ModelSerializer):
             return obj.unread_count
         membership = self.context.get("membership")
         if membership is None or membership.last_read_at is None:
-            return obj.messages.exclude(sender_id=membership.user_id).count() if membership else 0
-        return obj.messages.filter(created_at__gt=membership.last_read_at).exclude(sender_id=membership.user_id).count()
+            return obj.messages.exclude(sender_id=membership.user_id).exclude(hidden_by__user_id=membership.user_id).count() if membership else 0
+        return obj.messages.filter(created_at__gt=membership.last_read_at).exclude(sender_id=membership.user_id).exclude(hidden_by__user_id=membership.user_id).count()
 
 
 class ChatMessageSerializer(serializers.ModelSerializer):
@@ -45,12 +45,27 @@ class ChatMessageSerializer(serializers.ModelSerializer):
     expense_amount = serializers.DecimalField(
         source="expense.amount", max_digits=12, decimal_places=2, read_only=True, allow_null=True,
     )
+    reactions = serializers.SerializerMethodField()
+
+    def get_reactions(self, obj):
+        reactions = getattr(obj, "prefetched_reactions", None)
+        if reactions is None:
+            reactions = obj.reactions.select_related("user").all()
+        counts = {}
+        current_user_id = self.context.get("request").user.pk if self.context.get("request") else None
+        for reaction in reactions:
+            counts.setdefault(reaction.emoji, {"emoji": reaction.emoji, "count": 0, "reacted_by_me": False})
+            counts[reaction.emoji]["count"] += 1
+            if reaction.user_id == current_user_id:
+                counts[reaction.emoji]["reacted_by_me"] = True
+        return list(counts.values())
 
     class Meta:
         model = ChatMessage
         fields = [
             "id", "sender_id", "sender_name", "text", "message_type",
             "expense_id", "expense_title", "expense_amount", "created_at", "updated_at",
+            "reactions",
         ]
 
 

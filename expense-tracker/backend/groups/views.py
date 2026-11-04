@@ -20,13 +20,16 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounts.models import User
-from .models import ChatMessage, ExpensePayment, ExpenseShare, Group, Membership, Settlement, SharedExpense
+from .models import ChatMessage, ChatReaction, ExpensePayment, ExpenseShare, Group, HiddenChatMessage, Membership, Settlement, SharedExpense
 from .serializers import ChatMessageSerializer, GroupSerializer, MembershipSerializer, SettlementSerializer
 
 CENT = Decimal("0.01")
 MAX_AMOUNT = Decimal("9999999999.99")
 MAX_CHAT_WAIT_SECONDS = 20
 CHAT_POLL_INTERVAL_SECONDS = 1
+CHAT_DELETE_FOR_EVERYONE_LIMIT = timedelta(hours=1)
+EXPENSE_EDIT_LIMIT = timedelta(minutes=30)
+CHAT_REACTION_CHOICES = {"👍", "❤️", "😂", "😮", "😢", "🎉"}
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +47,7 @@ def groups_for_user(user):
                 "messages",
                 filter=(
                     ~Q(messages__sender_id=user.pk)
+                    & ~Q(messages__hidden_by__user_id=user.pk)
                     & (
                         Q(messages__created_at__gt=F("membership_last_read_at"))
                         | Q(membership_last_read_at__isnull=True)
@@ -282,6 +286,20 @@ class GroupMembersView(APIView):
         target.save(update_fields=["is_active"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    def patch(self, request, group_id, membership_id):
+        group = get_object_or_404(Group, pk=group_id)
+        acting = group_membership(group, request.user)
+        require_admin(acting)
+        target = get_object_or_404(Membership, group=group, pk=membership_id, is_active=True)
+        if target.role == "admin":
+            raise ValidationError("Group admins cannot be blocked.")
+        is_blocked = request.data.get("is_blocked")
+        if not isinstance(is_blocked, bool):
+            raise ValidationError({"is_blocked": "Provide a boolean value."})
+        target.is_blocked = is_blocked
+        target.save(update_fields=["is_blocked"])
+        return Response(MembershipSerializer(target).data)
+
 
 class GroupInviteView(APIView):
     permission_classes = [IsAuthenticated]
@@ -388,6 +406,8 @@ class GroupExpenseDetailView(APIView):
 
     def patch(self, request, group_id, expense_id):
         expense = self.get_object(request, group_id, expense_id)
+        if timezone.now() >= expense.created_at + EXPENSE_EDIT_LIMIT:
+            raise PermissionDenied("Shared expenses can only be edited within 30 minutes of creation.")
         payload, amount, shares, payments = validate_expense_payload(expense.group, request.user, request.data, expense)
         with transaction.atomic():
             for key, value in payload.items():
@@ -558,7 +578,9 @@ class GroupChatView(APIView):
         if wait_value is not None and after is None:
             raise ValidationError({"pagination": "wait can only be used with an after cursor."})
 
-        queryset = group.messages.select_related("sender", "expense")
+        queryset = group.messages.select_related("sender", "expense").prefetch_related(
+            Prefetch("reactions", queryset=ChatReaction.objects.select_related("user"), to_attr="prefetched_reactions"),
+        ).exclude(hidden_by__user_id=request.user.pk)
         next_before = None
         next_after = None
         if before:
@@ -595,12 +617,14 @@ class GroupChatView(APIView):
             messages = messages[:limit]
             messages.reverse()
             next_before = messages[0].id if messages and has_more else None
-        return Response({"results": ChatMessageSerializer(messages, many=True).data,
+        return Response({"results": ChatMessageSerializer(messages, many=True, context={"request": request}).data,
                          "next_before": next_before, "next_after": next_after, "has_more": has_more})
 
     def post(self, request, group_id):
         group = get_object_or_404(Group, pk=group_id)
-        group_membership(group, request.user)
+        membership = group_membership(group, request.user)
+        if membership.is_blocked:
+            raise PermissionDenied("You have been blocked from sending messages in this group.")
         message_type = str(request.data.get("message_type", "TEXT")).upper()
         if message_type == "EXPENSE":
             try:
@@ -625,7 +649,7 @@ class GroupChatView(APIView):
             created = True
         else:
             raise ValidationError({"message_type": "Choose TEXT or EXPENSE."})
-        serialized = ChatMessageSerializer(message).data
+        serialized = ChatMessageSerializer(message, context={"request": request}).data
         return Response(
             serialized,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -641,3 +665,57 @@ class GroupChatReadView(APIView):
         membership.last_read_at = timezone.now()
         membership.save(update_fields=["last_read_at"])
         return Response({"last_read_at": membership.last_read_at})
+
+
+class GroupChatClearView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, group_id):
+        group = get_object_or_404(Group, pk=group_id)
+        require_admin(group_membership(group, request.user))
+        group.messages.all().delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class GroupChatMessageActionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, group_id, message_id):
+        group = get_object_or_404(Group, pk=group_id)
+        group_membership(group, request.user)
+        message = get_object_or_404(ChatMessage, group=group, pk=message_id)
+        delete_for_everyone = request.data.get("for_everyone")
+        if not isinstance(delete_for_everyone, bool):
+            raise ValidationError({"for_everyone": "Provide a boolean value."})
+        if delete_for_everyone:
+            if message.sender_id != request.user.pk:
+                raise PermissionDenied("You can only delete your own messages for everyone.")
+            if timezone.now() >= message.created_at + CHAT_DELETE_FOR_EVERYONE_LIMIT:
+                raise PermissionDenied("Messages can only be deleted for everyone within one hour.")
+            message.delete()
+        else:
+            HiddenChatMessage.objects.get_or_create(message=message, user=request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class GroupChatReactionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, group_id, message_id):
+        group = get_object_or_404(Group, pk=group_id)
+        group_membership(group, request.user)
+        message = get_object_or_404(ChatMessage, group=group, pk=message_id)
+        emoji = request.data.get("emoji")
+        if not isinstance(emoji, str) or emoji not in CHAT_REACTION_CHOICES:
+            raise ValidationError({"emoji": "Choose a supported reaction emoji."})
+        reaction = ChatReaction.objects.filter(message=message, user=request.user).first()
+        if reaction and reaction.emoji == emoji:
+            reaction.delete()
+        else:
+            ChatReaction.objects.update_or_create(
+                message=message, user=request.user, defaults={"emoji": emoji},
+            )
+        message = ChatMessage.objects.select_related("sender", "expense").prefetch_related(
+            Prefetch("reactions", queryset=ChatReaction.objects.select_related("user"), to_attr="prefetched_reactions"),
+        ).get(pk=message.pk)
+        return Response(ChatMessageSerializer(message, context={"request": request}).data)

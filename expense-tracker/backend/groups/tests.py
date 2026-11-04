@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import User
 from expenses.models import AIInsight
-from .models import ChatMessage, ExpenseShare, Group, Membership, SharedExpense
+from .models import ChatMessage, ChatReaction, ExpenseShare, Group, HiddenChatMessage, Membership, SharedExpense
 
 
 class APIResponse(Protocol):
@@ -148,6 +148,29 @@ class GroupAPITests(TransactionTestCase):
         self.assertEqual(updated.data["title"], "Updated taxi")
         self.assertEqual(len(updated.data["shares"]), 2)
         self.assertEqual(updated.data["payments"][0]["amount"], "10.00")
+        self.client.force_authenticate(self.member)
+        member_edit = self.client.patch(
+            f"/api/groups/{self.group.id}/expenses/{created.data['id']}/", {"title": "Member edit"}, format="json",
+        )
+        self.assertEqual(member_edit.status_code, 200, member_edit.data)
+        self.assertEqual(member_edit.data["title"], "Member edit")
+
+    def test_group_expenses_can_only_be_edited_for_thirty_minutes(self):
+        created = self.client.post(f"/api/groups/{self.group.id}/expenses/", {
+            "title": "Taxi", "amount": "10.00", "date": timezone.localdate().isoformat(), "split_type": "equal",
+        }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        expense = SharedExpense.objects.get(pk=created.data["id"])
+        expense.created_at = timezone.now() - timedelta(minutes=31)
+        expense.save(update_fields=["created_at"])
+
+        response = self.client.patch(
+            f"/api/groups/{self.group.id}/expenses/{expense.id}/", {"title": "Too late"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        expense.refresh_from_db()
+        self.assertEqual(expense.title, "Taxi")
 
     def test_equal_split_rounds_to_cents_and_custom_payer_total_is_enforced(self):
         response = self.client.post(f"/api/groups/{self.group.id}/expenses/", {
@@ -238,6 +261,69 @@ class GroupAPITests(TransactionTestCase):
         self.assertEqual(self.client.get(url).status_code, 404)
         self.assertEqual(self.client.post(url, {"text": "Not a member"}, format="json").status_code, 404)
         self.assertEqual(self.client.post(f"{url}read/").status_code, 404)
+
+    def test_chat_reactions_delete_for_me_and_delete_for_everyone_limits(self):
+        message = self.client.post(f"/api/groups/{self.group.id}/chat/", {"text": "Dinner?"}, format="json")
+        message_id = message.data["id"]
+        reaction_url = f"/api/groups/{self.group.id}/chat/{message_id}/reaction/"
+        self.client.force_authenticate(self.member)
+
+        reacted = self.client.post(reaction_url, {"emoji": "👍"}, format="json")
+        self.assertEqual(reacted.status_code, 200, reacted.data)
+        self.assertEqual(reacted.data["reactions"], [{"emoji": "👍", "count": 1, "reacted_by_me": True}])
+        self.assertEqual(ChatReaction.objects.filter(message_id=message_id, user=self.member).count(), 1)
+        self.assertEqual(self.client.post(reaction_url, {"emoji": "💣"}).status_code, 400)
+        changed_reaction = self.client.post(reaction_url, {"emoji": "❤️"}, format="json")
+        self.assertEqual(changed_reaction.data["reactions"], [{"emoji": "❤️", "count": 1, "reacted_by_me": True}])
+
+        delete_url = f"/api/groups/{self.group.id}/chat/{message_id}/delete/"
+        self.assertEqual(self.client.post(delete_url, {"for_everyone": True}, format="json").status_code, 403)
+        hidden = self.client.post(delete_url, {"for_everyone": False}, format="json")
+        self.assertEqual(hidden.status_code, 204)
+        self.assertTrue(HiddenChatMessage.objects.filter(message_id=message_id, user=self.member).exists())
+        self.assertFalse(any(row["id"] == message_id for row in self.client.get(
+            f"/api/groups/{self.group.id}/chat/",
+        ).data["results"]))
+
+        self.client.force_authenticate(self.owner)
+        expired = ChatMessage.objects.get(pk=message_id)
+        expired.created_at = timezone.now() - timedelta(hours=1, seconds=1)
+        expired.save(update_fields=["created_at"])
+        self.assertEqual(self.client.post(delete_url, {"for_everyone": True}, format="json").status_code, 403)
+        self.assertTrue(ChatMessage.objects.filter(pk=message_id).exists())
+        recent = ChatMessage.objects.create(group=self.group, sender=self.owner, text="Delete in time")
+        recent_delete = self.client.post(
+            f"/api/groups/{self.group.id}/chat/{recent.id}/delete/", {"for_everyone": True}, format="json",
+        )
+        self.assertEqual(recent_delete.status_code, 204)
+        self.assertFalse(ChatMessage.objects.filter(pk=recent.id).exists())
+
+    def test_admin_can_block_and_clear_chat_but_members_cannot(self):
+        message = self.client.post(f"/api/groups/{self.group.id}/chat/", {"text": "Visible"}, format="json")
+        member_url = f"/api/groups/{self.group.id}/members/{self.member_id}/"
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.client.delete(f"/api/groups/{self.group.id}/chat/clear/").status_code, 403)
+        self.client.force_authenticate(self.owner)
+        blocked = self.client.patch(member_url, {"is_blocked": True}, format="json")
+        self.assertEqual(blocked.status_code, 200, blocked.data)
+        self.assertTrue(blocked.data["is_blocked"])
+        self.client.force_authenticate(self.member)
+        self.assertEqual(
+            self.client.post(f"/api/groups/{self.group.id}/chat/", {"text": "Blocked"}, format="json").status_code,
+            403,
+        )
+        self.assertEqual(self.client.get(f"/api/groups/{self.group.id}/chat/").status_code, 200)
+        self.client.force_authenticate(self.owner)
+        unblocked = self.client.patch(member_url, {"is_blocked": False}, format="json")
+        self.assertEqual(unblocked.status_code, 200)
+        self.client.force_authenticate(self.member)
+        self.assertEqual(
+            self.client.post(f"/api/groups/{self.group.id}/chat/", {"text": "Unblocked"}, format="json").status_code,
+            201,
+        )
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.client.delete(f"/api/groups/{self.group.id}/chat/clear/").status_code, 204)
+        self.assertFalse(ChatMessage.objects.filter(pk=message.data["id"]).exists())
 
     @patch("groups.views.time.sleep")
     def test_chat_long_poll_returns_new_messages_after_zero_cursor(self, sleep):
